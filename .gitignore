@@ -4,3 +4,6 @@ obj/
 *.user
 *.suo
 /SpectrumViewerRT-*.zip
+RELEASE.md
+publish/
+release/*.zip

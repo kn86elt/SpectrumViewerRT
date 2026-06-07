@@ -203,11 +203,11 @@
                     <TextBlock Text="Scale"/>
                     <ComboBox x:Name="ScaleCombo" Width="90" MinWidth="90" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="ScaleCombo_MouseDoubleClick"/>
                     <TextBlock Text="FPS"/>
-                    <Slider x:Name="FpsSlider" Width="100" Minimum="12" Maximum="60" Value="32" TickFrequency="4" Margin="8,0,6,0"
+                    <Slider x:Name="FpsSlider" Width="100" Minimum="12" Maximum="60" Value="60" TickFrequency="4" Margin="8,0,6,0"
                             ValueChanged="ControlValue_Changed"
                             MouseDoubleClick="FpsSlider_MouseDoubleClick"
                             ToolTip="Render update rate. Higher FPS makes movement smoother but does not change the time scale."/>
-                    <TextBlock x:Name="FpsValueText" Text="32 fps" MinWidth="48" Foreground="#9FB0C1" Margin="0,0,14,0"/>
+                    <TextBlock x:Name="FpsValueText" Text="60 fps" MinWidth="48" Foreground="#9FB0C1" Margin="0,0,14,0"/>
                     <TextBlock x:Name="StatusText" Text="Ready" Foreground="#9FB0C1"/>
                 </StackPanel>
 

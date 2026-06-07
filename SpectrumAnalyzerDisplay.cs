@@ -10,15 +10,17 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
     private double[] _holds = Array.Empty<double>();
 
     public int ColorTheme { get; set; }
+    public int MeterStyle { get; set; }
     public bool ShowUnlitSegments { get; set; } = true;
     public bool GlowEnabled { get; set; } = true;
     public bool TextureEnabled { get; set; } = true;
 
-    public void Update(double[] levels, double[] holds, int colorTheme, bool showUnlitSegments, bool glowEnabled, bool textureEnabled)
+    public void Update(double[] levels, double[] holds, int colorTheme, int meterStyle, bool showUnlitSegments, bool glowEnabled, bool textureEnabled)
     {
         _levels = levels;
         _holds = holds;
         ColorTheme = colorTheme;
+        MeterStyle = meterStyle;
         ShowUnlitSegments = showUnlitSegments;
         GlowEnabled = glowEnabled;
         TextureEnabled = textureEnabled;
@@ -123,6 +125,12 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
     private void DrawAnalyzerSegment(DrawingContext dc, Rect rect, Color color, bool active)
     {
+        if (MeterStyle == 1)
+        {
+            DrawFineLineSegment(dc, rect, color, active);
+            return;
+        }
+
         if (active && GlowEnabled)
         {
             dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 36)), null, Inflate(rect, 3.0, 2.0), 2, 2);
@@ -130,6 +138,34 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         }
 
         dc.DrawRoundedRectangle(new SolidColorBrush(color), null, rect, 1, 1);
+    }
+
+    private void DrawFineLineSegment(DrawingContext dc, Rect rect, Color color, bool active)
+    {
+        var brush = new SolidColorBrush(color);
+        int lines = Math.Max(2, Math.Min(4, (int)Math.Floor(rect.Height / 2.0)));
+        double lineHeight = 1.0;
+        double innerHeight = Math.Max(0, rect.Height - lineHeight);
+        var guidelines = new GuidelineSet();
+        for (int i = 0; i < lines; i++)
+        {
+            double t = lines == 1 ? 0 : i / (double)(lines - 1);
+            double y = Math.Round(rect.Top + t * innerHeight) + 0.5;
+            guidelines.GuidelinesY.Add(y);
+            guidelines.GuidelinesY.Add(y + lineHeight);
+        }
+        guidelines.GuidelinesX.Add(Math.Round(rect.Left) + 0.5);
+        guidelines.GuidelinesX.Add(Math.Round(rect.Right) + 0.5);
+        dc.PushGuidelineSet(guidelines);
+        for (int i = 0; i < lines; i++)
+        {
+            double t = lines == 1 ? 0 : i / (double)(lines - 1);
+            double y = Math.Round(rect.Top + t * innerHeight) + 0.5;
+            if (active && GlowEnabled)
+                dc.DrawRectangle(new SolidColorBrush(WithAlpha(color, 58)), null, new Rect(rect.Left - 1, y - 1.5, rect.Width + 2, 4.0));
+            dc.DrawRectangle(brush, null, new Rect(rect.Left, y, rect.Width, lineHeight));
+        }
+        dc.Pop();
     }
 
     private Color InactiveColor()

@@ -6,6 +6,9 @@ Windows desktop app for realtime audio monitoring, recording, playback, WAV expo
 Spectrogram mode
 (Audio Generated via [imagetoaudio](https://nsspot.herokuapp.com/imagetoaudio/) )
 
+![Screenshot2](screenshot2.jpg)
+Spectrum Analyzer mode
+
 ## Features
 
 - Microphone input capture

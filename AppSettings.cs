@@ -74,7 +74,7 @@ public static class Defaults
     public const double RangeDb = 85.0;
     public const double MinRangeDb = 45.0;
     public const double MaxRangeDb = 120.0;
-    public const double Fps = 32.0;
+    public const double Fps = 60.0;
     public const double MinFps = 12.0;
     public const double MaxFps = 60.0;
     public const double TimeDivisionSeconds = 1.0;

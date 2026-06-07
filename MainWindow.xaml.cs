@@ -33,7 +33,7 @@ public partial class MainWindow : Window
     private double _scrollColumnAccumulator;
     private readonly double[] _analyzerLevels = new double[48];
     private readonly double[] _analyzerHolds = Enumerable.Repeat(-90.0, 48).ToArray();
-    private DateTime _analyzerHoldUntil;
+    private readonly DateTime[] _analyzerHoldUntil = new DateTime[48];
     private IAudioCaptureSource? _capture;
     private AudioPlayback? _monitor;
     private DateTime _recordingStarted;
@@ -306,6 +306,10 @@ public partial class MainWindow : Window
                 _latestRenderSamples.Clear();
             }
         }
+        else if (DisplayModeCombo.SelectedIndex == 1 && _capture != null)
+        {
+            DecaySpectrumAnalyzerHolds(DateTime.Now);
+        }
 
         UpdateLevelMeter();
         PeakText.Text = _peak > 0.00001 ? $"Peak: {20 * Math.Log10(_peak):0.0} dB" : "Peak: -inf dB";
@@ -365,15 +369,33 @@ public partial class MainWindow : Window
             if (db >= _analyzerHolds[band])
             {
                 _analyzerHolds[band] = db;
-                _analyzerHoldUntil = now.AddMilliseconds(900);
+                _analyzerHoldUntil[band] = now.AddMilliseconds(900);
             }
-            else if (now > _analyzerHoldUntil)
+            else if (now > _analyzerHoldUntil[band])
             {
-                _analyzerHolds[band] = Math.Max(_analyzerLevels[band], _analyzerHolds[band] - 0.8);
+                _analyzerHolds[band] = Math.Max(_analyzerLevels[band], _analyzerHolds[band] - 1.2);
             }
         }
 
         UpdateSpectrumAnalyzerDisplay();
+    }
+
+    private void DecaySpectrumAnalyzerHolds(DateTime now)
+    {
+        bool changed = false;
+        for (int band = 0; band < _analyzerHolds.Length; band++)
+        {
+            _analyzerLevels[band] = Math.Max(-90.0, _analyzerLevels[band] - 2.0);
+            if (now <= _analyzerHoldUntil[band])
+                continue;
+
+            double previous = _analyzerHolds[band];
+            _analyzerHolds[band] = Math.Max(_analyzerLevels[band], _analyzerHolds[band] - 1.2);
+            changed |= Math.Abs(previous - _analyzerHolds[band]) > 0.001;
+        }
+
+        if (changed)
+            UpdateSpectrumAnalyzerDisplay();
     }
 
     private double PixelsPerSecond => ImageWidth / VisibleSeconds;
@@ -851,6 +873,7 @@ public partial class MainWindow : Window
         _peakHoldLevel = default;
         Array.Fill(_analyzerLevels, -90.0);
         Array.Fill(_analyzerHolds, -90.0);
+        Array.Fill(_analyzerHoldUntil, DateTime.MinValue);
         UpdateSpectrumAnalyzerDisplay();
         _resettingDisplay = false;
     }
@@ -1044,6 +1067,7 @@ public partial class MainWindow : Window
             _analyzerLevels,
             _analyzerHolds,
             Math.Max(0, MeterColorCombo.SelectedIndex),
+            Math.Max(0, MeterStyleCombo.SelectedIndex),
             ShowUnlitCheck.IsChecked == true,
             GlowCheck.IsChecked == true,
             TextureCheck.IsChecked == true);
@@ -1055,6 +1079,7 @@ public partial class MainWindow : Window
             _analyzerLevels,
             _analyzerHolds,
             Math.Max(0, MeterColorCombo.SelectedIndex),
+            Math.Max(0, MeterStyleCombo.SelectedIndex),
             ShowUnlitCheck.IsChecked == true,
             GlowCheck.IsChecked == true,
             TextureCheck.IsChecked == true);
