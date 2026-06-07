@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace SpectrumViewerRT;
 
-public sealed class AudioCapture : IDisposable
+public sealed class AudioCapture : IAudioCaptureSource
 {
     private sealed class BufferState
     {
@@ -12,9 +12,16 @@ public sealed class AudioCapture : IDisposable
         public byte[] Data { get; init; } = Array.Empty<byte>();
     }
 
-    public const int SampleRate = 48000;
+    public const int DefaultSampleRate = 48000;
+    public const int SampleRate = DefaultSampleRate;
     public event Action<short[]>? SamplesAvailable;
     public event Action<double>? LevelAvailable;
+    public event Action<LevelMeterReading>? StereoLevelAvailable;
+    public event Action<string>? StatusAvailable;
+    public int SampleRateValue => DefaultSampleRate;
+    int IAudioCaptureSource.SampleRate => DefaultSampleRate;
+
+    private readonly int? _deviceId;
 
     private readonly List<BufferState> _buffers = new();
     private readonly object _gate = new();
@@ -22,7 +29,15 @@ public sealed class AudioCapture : IDisposable
     private IntPtr _handle;
     private bool _running;
 
-    public AudioCapture() => _callback = OnWaveIn;
+    public AudioCapture()
+    {
+        _callback = OnWaveIn;
+    }
+
+    public AudioCapture(int deviceId) : this()
+    {
+        _deviceId = deviceId;
+    }
 
     public static IReadOnlyList<AudioDevice> GetInputDevices()
     {
@@ -52,6 +67,14 @@ public sealed class AudioCapture : IDisposable
 
         ThrowIfFailed(AudioInterop.waveInStart(_handle), "waveInStart");
         _running = true;
+        StatusAvailable?.Invoke($"waveIn started: {DefaultSampleRate} Hz, mono, 16 bit");
+    }
+
+    public void Start()
+    {
+        if (_deviceId == null)
+            throw new InvalidOperationException("Input device is not selected.");
+        Start(_deviceId.Value);
     }
 
     public void Stop()
@@ -118,6 +141,7 @@ public sealed class AudioCapture : IDisposable
 
         SamplesAvailable?.Invoke(samples);
         LevelAvailable?.Invoke(peak);
+        StereoLevelAvailable?.Invoke(LevelMeterReading.Mono(peak));
 
         lock (_gate)
         {

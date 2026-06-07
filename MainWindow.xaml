@@ -3,8 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:SpectrumViewerRT"
         mc:Ignorable="d"
-        Title="Spectrum Viewer RT" Height="720" Width="1120" MinHeight="560" MinWidth="860"
+        Title="Spectrum Viewer RT" Height="780" Width="1180" MinHeight="640" MinWidth="980"
         Background="#111418">
     <Window.Resources>
         <Style TargetType="TextBlock">
@@ -12,68 +13,269 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
         <Style TargetType="Button">
-            <Setter Property="MinWidth" Value="92"/>
+            <Setter Property="MinWidth" Value="90"/>
             <Setter Property="Height" Value="34"/>
             <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="Foreground" Value="#E6EDF3"/>
+            <Setter Property="Background" Value="#111820"/>
+            <Setter Property="BorderBrush" Value="#33414F"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#1D2833"/>
+                                <Setter TargetName="Border" Property="BorderBrush" Value="#5B748E"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#0A0F14"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#65717D"/>
+                                <Setter TargetName="Border" Property="Background" Value="#151A20"/>
+                                <Setter TargetName="Border" Property="BorderBrush" Value="#29313A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="Height" Value="32"/>
-            <Setter Property="MinWidth" Value="260"/>
             <Setter Property="Margin" Value="8,0,16,0"/>
+            <Setter Property="Foreground" Value="#E6EDF3"/>
+            <Setter Property="Background" Value="#111820"/>
+            <Setter Property="BorderBrush" Value="#33414F"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton"
+                                          Focusable="False"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          ClickMode="Press">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="Border"
+                                                Background="#111820"
+                                                BorderBrush="#33414F"
+                                                BorderThickness="1"
+                                                CornerRadius="3">
+                                            <Grid>
+                                                <ContentPresenter Margin="8,0,28,0"
+                                                                  HorizontalAlignment="Left"
+                                                                  VerticalAlignment="Center"
+                                                                  TextElement.Foreground="#E6EDF3"
+                                                                  Content="{TemplateBinding Content}"
+                                                                  ContentTemplate="{TemplateBinding ContentTemplate}"/>
+                                                <Path HorizontalAlignment="Right"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,10,0"
+                                                      Fill="#9FB0C1"
+                                                      Data="M 0 0 L 4 4 L 8 0 Z"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Border" Property="Background" Value="#1D2833"/>
+                                                <Setter TargetName="Border" Property="BorderBrush" Value="#5B748E"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Border" Property="Background" Value="#172331"/>
+                                                <Setter TargetName="Border" Property="BorderBrush" Value="#5B748E"/>
+                                            </Trigger>
+                                            <Trigger Property="IsEnabled" Value="False">
+                                                <Setter TargetName="Border" Property="Background" Value="#151A20"/>
+                                                <Setter TargetName="Border" Property="BorderBrush" Value="#29313A"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
+                                                  TextElement.Foreground="#E6EDF3"
+                                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+                            </ToggleButton>
+
+                            <Popup x:Name="Popup"
+                                   Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Fade">
+                                <Border Background="#111820"
+                                        BorderBrush="#33414F"
+                                        BorderThickness="1"
+                                        CornerRadius="3"
+                                        MinWidth="{TemplateBinding ActualWidth}">
+                                    <ScrollViewer MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                                  CanContentScroll="True">
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#65717D"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="#E6EDF3"/>
+            <Setter Property="Background" Value="#111820"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" BorderBrush="#26333F" BorderThickness="0,0,0,1">
+                            <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#1D2833"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#24364A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
 
     <DockPanel LastChildFill="True">
-        <Border DockPanel.Dock="Top" Background="#1B2027" BorderBrush="#2D3540" BorderThickness="0,0,0,1" Padding="14,12">
+        <Border x:Name="TopPanel" DockPanel.Dock="Top" Background="#1B2027" BorderBrush="#2D3540" BorderThickness="0,0,0,1" Padding="14,12">
             <Grid>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="170"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Text="Input" FontWeight="SemiBold"/>
-                <ComboBox x:Name="DeviceCombo" Grid.Column="1" HorizontalAlignment="Left" DisplayMemberPath="Name"/>
-                <StackPanel Grid.Column="2" Orientation="Horizontal">
-                    <Button x:Name="RefreshButton" Content="更新" Click="RefreshButton_Click"/>
-                    <Button x:Name="StartButton" Content="開始" Click="StartButton_Click"/>
-                    <Button x:Name="StopButton" Content="停止" Click="StopButton_Click" IsEnabled="False"/>
-                    <Button x:Name="PlayButton" Content="再生" Click="PlayButton_Click" IsEnabled="False"/>
-                    <Button x:Name="SaveButton" Content="WAV保存" Click="SaveButton_Click" IsEnabled="False"/>
+                <TextBlock Text="Source" FontWeight="SemiBold"/>
+                <ComboBox x:Name="ModeCombo" Grid.Column="1" SelectionChanged="ModeCombo_SelectionChanged"/>
+                <TextBlock Grid.Column="2" Text="Device" FontWeight="SemiBold"/>
+                <ComboBox x:Name="DeviceCombo" Grid.Column="3" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"/>
+                <StackPanel Grid.Column="4" Orientation="Horizontal">
+                    <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click"/>
+                    <Button x:Name="StartButton" Content="Record" Click="StartButton_Click"/>
+                    <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" IsEnabled="False"/>
+                    <Button x:Name="PlayButton" Content="Play" Click="PlayButton_Click" IsEnabled="False"/>
+                    <Button x:Name="SaveButton" Content="Save WAV" Click="SaveButton_Click" IsEnabled="False"/>
+                    <Button x:Name="DefaultsButton" Content="Defaults" Click="DefaultsButton_Click"/>
                 </StackPanel>
 
-                <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,12,0,0">
-                    <CheckBox x:Name="MonitorCheck" Content="モニター" Foreground="#E6EDF3" VerticalAlignment="Center" Margin="0,0,18,0"/>
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,12,0,0">
+                    <CheckBox x:Name="MonitorCheck" Content="Monitor" Foreground="#E6EDF3" VerticalAlignment="Center" Margin="0,0,18,0"
+                              Checked="MonitorCheck_Changed" Unchecked="MonitorCheck_Changed"
+                              ToolTip="Starts live display without recording."/>
                     <TextBlock Text="Gain"/>
-                    <Slider x:Name="GainSlider" Width="130" Minimum="0.2" Maximum="8" Value="2.4" TickFrequency="0.2" Margin="8,0,18,0"/>
+                    <Slider x:Name="GainSlider" Width="118" Minimum="0.2" Maximum="8" Value="2.4" TickFrequency="0.2" Margin="8,0,6,0"
+                            ValueChanged="ControlValue_Changed"
+                            MouseDoubleClick="GainSlider_MouseDoubleClick"
+                            ToolTip="FFT input gain multiplier. It changes spectrogram brightness only, not audio volume."/>
+                    <TextBlock x:Name="GainValueText" Text="x2.4" MinWidth="36" Foreground="#9FB0C1" Margin="0,0,14,0"/>
                     <TextBlock Text="Range"/>
-                    <Slider x:Name="RangeSlider" Width="130" Minimum="45" Maximum="120" Value="85" TickFrequency="5" Margin="8,0,18,0"/>
+                    <Slider x:Name="RangeSlider" Width="130" Minimum="45" Maximum="120" Value="85" TickFrequency="5" Margin="8,0,18,0"
+                            ValueChanged="DisplaySetting_Changed"
+                            MouseDoubleClick="RangeSlider_MouseDoubleClick"
+                            ToolTip="Spectrogram dynamic range in dB. Lower values make quiet details brighter; higher values preserve more level contrast."/>
+                    <TextBlock x:Name="RangeValueText" Text="85 dB" MinWidth="42" Foreground="#9FB0C1" Margin="-12,0,14,0"/>
+                    <TextBlock Text="Scale"/>
+                    <ComboBox x:Name="ScaleCombo" Width="90" MinWidth="90" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="ScaleCombo_MouseDoubleClick"/>
                     <TextBlock Text="FPS"/>
-                    <Slider x:Name="FpsSlider" Width="120" Minimum="12" Maximum="60" Value="32" TickFrequency="4" Margin="8,0,18,0"/>
-                    <TextBlock x:Name="StatusText" Text="準備完了" Foreground="#9FB0C1"/>
+                    <Slider x:Name="FpsSlider" Width="100" Minimum="12" Maximum="60" Value="32" TickFrequency="4" Margin="8,0,6,0"
+                            ValueChanged="ControlValue_Changed"
+                            MouseDoubleClick="FpsSlider_MouseDoubleClick"
+                            ToolTip="Render update rate. Higher FPS makes movement smoother but does not change the time scale."/>
+                    <TextBlock x:Name="FpsValueText" Text="32 fps" MinWidth="48" Foreground="#9FB0C1" Margin="0,0,14,0"/>
+                    <TextBlock x:Name="StatusText" Text="Ready" Foreground="#9FB0C1"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="Max Hz"/>
+                    <ComboBox x:Name="MaxFrequencyCombo" Width="100" MinWidth="100" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="MaxFrequencyCombo_MouseDoubleClick"/>
+                    <CheckBox x:Name="GridCheck" Content="Grid" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
+                              Margin="0,0,18,0" Checked="GridSetting_Changed" Unchecked="GridSetting_Changed"/>
+                    <TextBlock Text="Grid Time/div"/>
+                    <Slider x:Name="TimeDivisionSlider" Width="150" Minimum="0.25" Maximum="5" Value="1" TickFrequency="0.25"
+                            Margin="8,0,8,0" ValueChanged="GridSetting_Changed"
+                            MouseDoubleClick="TimeDivisionSlider_MouseDoubleClick"
+                            ToolTip="Seconds per horizontal division. This controls the time scale of the spectrogram and waveform."/>
+                    <TextBlock x:Name="TimeDivisionText" Text="1.00 s"/>
+                    <TextBlock Text="Visible"/>
+                    <TextBlock x:Name="VisibleTimeText" Text="37.5 s" Foreground="#9FB0C1" Margin="8,0,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="Display"/>
+                    <ComboBox x:Name="DisplayModeCombo" Width="140" MinWidth="140" Margin="8,0,18,0" SelectionChanged="DisplayModeCombo_SelectionChanged"/>
+                    <TextBlock Text="Meter Color"/>
+                    <ComboBox x:Name="MeterColorCombo" Width="110" MinWidth="110" Margin="8,0,18,0" SelectionChanged="MeterSetting_Changed"/>
+                    <TextBlock Text="Meter Type"/>
+                    <ComboBox x:Name="MeterStyleCombo" Width="110" MinWidth="110" Margin="8,0,18,0" SelectionChanged="MeterSetting_Changed"/>
+                    <CheckBox x:Name="ShowUnlitCheck" Content="Dim off" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
+                              Margin="0,0,18,0" Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
+                              ToolTip="Shows inactive VFD segments very faintly."/>
+                    <CheckBox x:Name="GlowCheck" Content="Glow" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
+                              Margin="0,0,18,0"
+                              Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
+                              ToolTip="Adds a soft glow around active VFD segments."/>
+                    <CheckBox x:Name="TextureCheck" Content="Texture" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
+                              Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
+                              ToolTip="Overlays subtle VFD glass and scanline texture."/>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <Grid Margin="14">
+        <Grid x:Name="MainContentGrid" Margin="14">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
-                <RowDefinition Height="76"/>
+                <RowDefinition Height="24"/>
+                <RowDefinition Height="112"/>
+                <RowDefinition Height="92"/>
             </Grid.RowDefinitions>
 
             <Border BorderBrush="#2D3540" BorderThickness="1" Background="#07090C">
                 <Grid>
                     <Image x:Name="SpectrogramImage" Stretch="Fill" SnapsToDevicePixels="True"/>
-                    <TextBlock Text="20 Hz" Foreground="#8DA0B3" Margin="10,0,0,8" VerticalAlignment="Bottom"/>
-                    <TextBlock Text="24 kHz" Foreground="#8DA0B3" Margin="10,8,0,0" VerticalAlignment="Top"/>
+                    <Canvas x:Name="SpectrogramGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
+                    <local:SpectrumAnalyzerDisplay x:Name="SpectrumAnalyzer" Visibility="Collapsed"/>
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1" Margin="0,12,0,0" Background="#1B2027" BorderBrush="#2D3540" BorderThickness="1" Padding="12">
+            <Border Grid.Row="1" Margin="0,0,0,0" Background="#10161D" BorderBrush="#2D3540" BorderThickness="1,0,1,1">
+                <Canvas x:Name="TimeAxisCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
+            </Border>
+
+            <Border Grid.Row="2" Margin="0,12,0,0" BorderBrush="#2D3540" BorderThickness="1" Background="#07090C">
+                <Grid>
+                    <Image x:Name="WaveformImage" Stretch="Fill" SnapsToDevicePixels="True"/>
+                    <Canvas x:Name="WaveformGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
+                    <TextBlock Text="Waveform" Foreground="#8DA0B3" Margin="10,8,0,0" VerticalAlignment="Top"/>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="3" Margin="0,12,0,0" Background="#1B2027" BorderBrush="#2D3540" BorderThickness="1" Padding="12">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -81,10 +283,15 @@
                         <ColumnDefinition Width="160"/>
                         <ColumnDefinition Width="160"/>
                     </Grid.ColumnDefinitions>
-                    <ProgressBar x:Name="LevelBar" Minimum="0" Maximum="1" Height="18" VerticalAlignment="Center"/>
+                    <local:VfdLevelMeter x:Name="LevelMeter" Height="68" VerticalAlignment="Center"/>
                     <TextBlock x:Name="PeakText" Grid.Column="1" Text="Peak: -inf dB" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="DurationText" Grid.Column="2" Text="録音: 00:00" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="FormatText" Grid.Column="3" Text="48 kHz / mono" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="DurationText" Grid.Column="2" Text="Live: 00:00" HorizontalAlignment="Center"/>
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Center">
+                        <CheckBox x:Name="MeterOnlyCheck" Content="Meter only" Foreground="#E6EDF3" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  Checked="MeterOnlyCheck_Changed" Unchecked="MeterOnlyCheck_Changed"/>
+                        <CheckBox x:Name="AlwaysOnTopCheck" Content="Top" Foreground="#E6EDF3" VerticalAlignment="Center"
+                                  Checked="AlwaysOnTopCheck_Changed" Unchecked="AlwaysOnTopCheck_Changed"/>
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>
