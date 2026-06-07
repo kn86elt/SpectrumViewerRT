@@ -2,7 +2,7 @@
 
 Windows desktop app for realtime audio monitoring, recording, playback, WAV export, and scrolling color spectrogram display.
 
-[Screenshot](screenshot.jpg)
+![Screenshot](screenshot.jpg)
 Spectrogram mode
 (Audio Generated via [imagetoaudio](https://nsspot.herokuapp.com/imagetoaudio/) )
 
@@ -54,3 +54,9 @@ Changing `Range`, `Scale`, or `Max Hz` clears the current display and restarts d
 Double-click a setting control to restore that control's default value, or press `Defaults` to restore all display settings.
 
 In `System Output` mode, the app captures the Windows default playback device with WASAPI loopback. `Monitor` starts live analysis, but it does not route system output back to the speakers again.
+
+
+
+## License
+Code in this repository is licensed under MIT.
+
