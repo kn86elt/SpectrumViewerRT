@@ -32,11 +32,25 @@ Spectrum Analyzer mode
 
 ## Run
 
+### Release zip
+
+Download and extract `SpectrumViewerRT-vX.Y.Z-win-x64.zip`, then run:
+
+```powershell
+.\SpectrumViewerRT.exe
+```
+
+The release zip is framework-dependent. Install the .NET 6 Desktop Runtime for Windows x64 if the app does not start:
+
+https://dotnet.microsoft.com/en-us/download/dotnet/6.0
+
+### From source
+
 ```powershell
 dotnet run
 ```
 
-Or start the published app:
+Or start a locally published app:
 
 ```powershell
 .\bin\Release\net6.0-windows\publish\SpectrumViewerRT.exe
@@ -62,4 +76,3 @@ In `System Output` mode, the app captures the Windows default playback device wi
 
 ## License
 Code in this repository is licensed under MIT.
-
