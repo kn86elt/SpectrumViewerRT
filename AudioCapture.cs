@@ -27,7 +27,7 @@ public sealed class AudioCapture : IAudioCaptureSource
     private readonly object _gate = new();
     private readonly AudioInterop.WaveInProc _callback;
     private IntPtr _handle;
-    private bool _running;
+    private volatile bool _running;
 
     public AudioCapture()
     {
@@ -79,24 +79,25 @@ public sealed class AudioCapture : IAudioCaptureSource
 
     public void Stop()
     {
-        if (_handle == IntPtr.Zero)
+        var handle = _handle;
+        if (handle == IntPtr.Zero)
             return;
+
+        _running = false;
+        AudioInterop.waveInStop(handle);
+        AudioInterop.waveInReset(handle);
 
         lock (_gate)
         {
-            _running = false;
-            AudioInterop.waveInStop(_handle);
-            AudioInterop.waveInReset(_handle);
-
             foreach (var buffer in _buffers)
             {
-                AudioInterop.waveInUnprepareHeader(_handle, buffer.HeaderPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>());
+                AudioInterop.waveInUnprepareHeader(handle, buffer.HeaderPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>());
                 Marshal.FreeHGlobal(buffer.DataPtr);
                 Marshal.FreeHGlobal(buffer.HeaderPtr);
             }
 
             _buffers.Clear();
-            AudioInterop.waveInClose(_handle);
+            AudioInterop.waveInClose(handle);
             _handle = IntPtr.Zero;
         }
     }

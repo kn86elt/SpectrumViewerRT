@@ -1,5 +1,6 @@
 using Microsoft.Win32;
 using System.Collections.Concurrent;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -36,14 +37,22 @@ public partial class MainWindow : Window
     private readonly DateTime[] _analyzerHoldUntil = new DateTime[48];
     private IAudioCaptureSource? _capture;
     private AudioPlayback? _monitor;
+    private readonly MediaPlayer _playbackPlayer = new();
+    private readonly DispatcherTimer _playbackTimer = new();
+    private short[] _playbackSamples = Array.Empty<short>();
+    private string? _playbackTempFile;
+    private int _lastPlaybackSampleOffset;
     private DateTime _recordingStarted;
+    private DateTime _playbackStarted;
     private double _peak;
     private LevelMeterReading _currentLevel;
     private LevelMeterReading _peakHoldLevel;
     private DateTime _leftPeakHoldUntil;
     private DateTime _rightPeakHoldUntil;
     private bool _isRecording;
+    private bool _isPlayingBack;
     private bool _changingMonitorCheck;
+    private bool _updatingPlaybackSlider;
     private bool _loadingSettings;
     private bool _resettingDisplay;
     private bool _uiReady;
@@ -89,6 +98,10 @@ public partial class MainWindow : Window
         ClearWaveform();
 
         _renderTimer.Tick += RenderTimer_Tick;
+        _playbackTimer.Interval = TimeSpan.FromMilliseconds(33);
+        _playbackTimer.Tick += PlaybackTimer_Tick;
+        _playbackPlayer.MediaEnded += (_, _) => FinishPlayback("Playback finished", completed: true);
+        _playbackPlayer.MediaFailed += (_, e) => FinishPlayback($"Playback failed: {e.ErrorException.Message}", completed: false);
         _vfdDecayTimer.Interval = TimeSpan.FromMilliseconds(33);
         _vfdDecayTimer.Tick += VfdDecayTimer_Tick;
         RefreshDevices();
@@ -124,10 +137,15 @@ public partial class MainWindow : Window
     {
         try
         {
+            StopPlayback(updateStatus: false);
             StopCapture(triggerVfdDecay: false);
             CancelVfdDecay();
             if (record)
+            {
                 _recorded.Clear();
+                _playbackSamples = Array.Empty<short>();
+                UpdatePlaybackSliderBounds();
+            }
             _sampleWindow.Clear();
             _latestRenderSamples.Clear();
             _scrollColumnAccumulator = 0;
@@ -183,6 +201,12 @@ public partial class MainWindow : Window
 
     private void StopButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_isPlayingBack)
+        {
+            StopPlayback();
+            return;
+        }
+
         StopCapture();
         SetMonitorChecked(false);
         SetStoppedState();
@@ -216,19 +240,226 @@ public partial class MainWindow : Window
         if (_recorded.Count == 0)
             return;
 
-        Task.Run(() =>
+        int startOffset = SecondsToSampleOffset(PlaybackSlider.Value);
+        if (startOffset >= _recorded.Count)
+            startOffset = 0;
+        StartPlayback(startOffset);
+    }
+
+    private void StartPlayback(int startOffset)
+    {
+        StopPlayback(updateStatus: false);
+
+        var recorded = _recorded.ToArray();
+        if (recorded.Length == 0)
+            return;
+
+        _playbackSamples = recorded;
+        startOffset = Math.Clamp(startOffset, 0, recorded.Length - 1);
+
+        PreparePlaybackDisplay(startOffset);
+        try
         {
-            using var player = new AudioPlayback();
-            const int chunk = DisplaySampleRate / 20;
-            for (int offset = 0; offset < _recorded.Count; offset += chunk)
-            {
-                int length = Math.Min(chunk, _recorded.Count - offset);
-                var samples = new short[length];
-                _recorded.CopyTo(offset, samples, 0, length);
-                player.Play(samples);
-                Thread.Sleep(TimeSpan.FromSeconds(length / (double)DisplaySampleRate));
-            }
-        });
+            _playbackTempFile = CreatePlaybackWaveFile(recorded);
+            _playbackPlayer.Open(new Uri(_playbackTempFile));
+            _playbackPlayer.Position = TimeSpan.FromSeconds(SamplesToSeconds(startOffset));
+        }
+        catch (Exception ex)
+        {
+            FinishPlayback($"Playback failed: {ex.Message}", completed: false);
+            return;
+        }
+
+        _isPlayingBack = true;
+        _lastPlaybackSampleOffset = startOffset;
+        _playbackStarted = DateTime.Now.AddSeconds(-startOffset / (double)DisplaySampleRate);
+        _renderTimer.Interval = TimeSpan.FromSeconds(1.0 / Math.Max(1.0, FpsSlider.Value));
+        _renderTimer.Start();
+        _playbackTimer.Start();
+        _playbackPlayer.Play();
+        StartButton.IsEnabled = false;
+        StopButton.IsEnabled = true;
+        PlayButton.IsEnabled = false;
+        SaveButton.IsEnabled = false;
+        SetStatus("Playing recording");
+    }
+
+    private void StopPlayback(bool updateStatus = true)
+    {
+        _playbackTimer.Stop();
+        _playbackPlayer.Stop();
+        _playbackPlayer.Close();
+        _isPlayingBack = false;
+        while (_pendingSamples.TryDequeue(out _)) { }
+        if (_capture == null)
+            _renderTimer.Stop();
+        SetStoppedState();
+        DeletePlaybackTempFile();
+        if (updateStatus)
+            SetStatus(_recorded.Count > 0 ? "Playback stopped" : "Ready");
+    }
+
+    private void FinishPlayback(string status, bool completed)
+    {
+        _playbackTimer.Stop();
+        _playbackPlayer.Stop();
+        _playbackPlayer.Close();
+        _isPlayingBack = false;
+        if (_capture == null)
+            _renderTimer.Stop();
+        SetStoppedState();
+        SetStatus(status);
+        DeletePlaybackTempFile();
+        if (completed)
+            UpdatePlaybackPosition(_playbackSamples.Length);
+    }
+
+    private void PreparePlaybackDisplay(int startOffset)
+    {
+        _sampleWindow.Clear();
+        _latestRenderSamples.Clear();
+        _scrollColumnAccumulator = 0;
+        _peak = 0;
+        _currentLevel = default;
+        _peakHoldLevel = default;
+        while (_pendingSamples.TryDequeue(out _)) { }
+        ClearSpectrogram();
+        ClearWaveform();
+        UpdatePlaybackSliderBounds();
+        UpdatePlaybackPosition(startOffset);
+    }
+
+    private void EnqueuePlaybackSamples(short[] samples, int nextOffset)
+    {
+        _pendingSamples.Enqueue(samples);
+        UpdatePlaybackLevel(samples);
+        UpdatePlaybackPosition(nextOffset);
+    }
+
+    private void UpdatePlaybackLevel(short[] samples)
+    {
+        double peak = 0;
+        for (int i = 0; i < samples.Length; i++)
+            peak = Math.Max(peak, Math.Abs(samples[i] / 32768.0));
+
+        _peak = Math.Max(_peak * 0.92, peak);
+        _currentLevel = LevelMeterReading.Mono(peak);
+    }
+
+    private void UpdatePlaybackSliderBounds()
+    {
+        if (PlaybackSlider == null || PlaybackPositionText == null)
+            return;
+
+        _updatingPlaybackSlider = true;
+        PlaybackSlider.Maximum = SamplesToSeconds(_recorded.Count);
+        _updatingPlaybackSlider = false;
+        UpdatePlaybackPosition(SecondsToSampleOffset(PlaybackSlider.Value));
+    }
+
+    private void UpdatePlaybackPosition(int sampleOffset)
+    {
+        if (PlaybackSlider == null || PlaybackPositionText == null)
+            return;
+
+        double position = SamplesToSeconds(Math.Clamp(sampleOffset, 0, _playbackSamples.Length > 0 ? _playbackSamples.Length : _recorded.Count));
+        double duration = SamplesToSeconds(_playbackSamples.Length > 0 ? _playbackSamples.Length : _recorded.Count);
+        _updatingPlaybackSlider = true;
+        PlaybackSlider.Maximum = duration;
+        PlaybackSlider.Value = Math.Clamp(position, PlaybackSlider.Minimum, PlaybackSlider.Maximum);
+        _updatingPlaybackSlider = false;
+        PlaybackPositionText.Text = $"{FormatDuration(position)} / {FormatDuration(duration)}";
+    }
+
+    private void PlaybackSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_updatingPlaybackSlider)
+            return;
+
+        UpdatePlaybackPosition(SecondsToSampleOffset(PlaybackSlider.Value));
+    }
+
+    private void PlaybackSlider_SeekCommitted(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_recorded.Count == 0)
+            return;
+
+        int offset = SecondsToSampleOffset(PlaybackSlider.Value);
+        if (_isPlayingBack)
+            SeekPlayback(offset);
+        else
+            UpdatePlaybackPosition(offset);
+    }
+
+    private void PlaybackTimer_Tick(object? sender, EventArgs e)
+    {
+        if (!_isPlayingBack || _playbackSamples.Length == 0)
+            return;
+
+        int currentOffset = Math.Clamp(SecondsToSampleOffset(_playbackPlayer.Position.TotalSeconds), 0, _playbackSamples.Length);
+        if (currentOffset < _lastPlaybackSampleOffset)
+            _lastPlaybackSampleOffset = currentOffset;
+
+        const int chunk = DisplaySampleRate / 20;
+        while (_lastPlaybackSampleOffset < currentOffset)
+        {
+            int length = Math.Min(chunk, currentOffset - _lastPlaybackSampleOffset);
+            var samples = new short[length];
+            Array.Copy(_playbackSamples, _lastPlaybackSampleOffset, samples, 0, length);
+            _lastPlaybackSampleOffset += length;
+            EnqueuePlaybackSamples(samples, _lastPlaybackSampleOffset);
+        }
+
+        UpdatePlaybackPosition(currentOffset);
+    }
+
+    private void SeekPlayback(int offset)
+    {
+        offset = Math.Clamp(offset, 0, Math.Max(0, _playbackSamples.Length - 1));
+        PreparePlaybackDisplay(offset);
+        _lastPlaybackSampleOffset = offset;
+        _playbackStarted = DateTime.Now.AddSeconds(-offset / (double)DisplaySampleRate);
+        _playbackPlayer.Position = TimeSpan.FromSeconds(SamplesToSeconds(offset));
+        _playbackPlayer.Play();
+    }
+
+    private string CreatePlaybackWaveFile(short[] samples)
+    {
+        DeletePlaybackTempFile();
+        string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"SpectrumViewerRT-playback-{Environment.ProcessId}.wav");
+        WaveFile.Save16BitMono(path, samples, DisplaySampleRate);
+        return path;
+    }
+
+    private void DeletePlaybackTempFile()
+    {
+        if (string.IsNullOrEmpty(_playbackTempFile))
+            return;
+
+        try
+        {
+            if (File.Exists(_playbackTempFile))
+                File.Delete(_playbackTempFile);
+        }
+        catch
+        {
+            // The temp file is best-effort cleanup; playback can continue without it.
+        }
+
+        _playbackTempFile = null;
+    }
+
+    private static double SamplesToSeconds(int samples) => samples / (double)DisplaySampleRate;
+
+    private static int SecondsToSampleOffset(double seconds) =>
+        Math.Max(0, (int)Math.Round(seconds * DisplaySampleRate));
+
+    private static string FormatDuration(double seconds)
+    {
+        var time = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return time.TotalHours >= 1
+            ? $"{(int)time.TotalHours:0}:{time.Minutes:00}:{time.Seconds:00}"
+            : $"{time.Minutes:00}:{time.Seconds:00}";
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -313,7 +544,9 @@ public partial class MainWindow : Window
 
         UpdateLevelMeter();
         PeakText.Text = _peak > 0.00001 ? $"Peak: {20 * Math.Log10(_peak):0.0} dB" : "Peak: -inf dB";
-        DurationText.Text = $"{(_isRecording ? "Record" : "Live")}: {(DateTime.Now - _recordingStarted):mm\\:ss}";
+        DurationText.Text = _isPlayingBack
+            ? $"Playback: {(DateTime.Now - _playbackStarted):mm\\:ss}"
+            : $"{(_isRecording ? "Record" : "Live")}: {(DateTime.Now - _recordingStarted):mm\\:ss}";
         _renderTimer.Interval = TimeSpan.FromSeconds(1.0 / Math.Max(1.0, FpsSlider.Value));
     }
 
@@ -840,6 +1073,7 @@ public partial class MainWindow : Window
         SetInputControlsEnabled(true);
         PlayButton.IsEnabled = _recorded.Count > 0;
         SaveButton.IsEnabled = _recorded.Count > 0;
+        UpdatePlaybackSliderBounds();
     }
 
     private void SetInputControlsEnabled(bool enabled)
@@ -1173,6 +1407,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        StopPlayback(updateStatus: false);
         StopCapture(triggerVfdDecay: false);
         CancelVfdDecay();
         base.OnClosed(e);

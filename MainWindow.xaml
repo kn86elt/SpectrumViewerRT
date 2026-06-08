@@ -162,6 +162,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -243,6 +244,16 @@
                     <CheckBox x:Name="TextureCheck" Content="Texture" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
                               Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
                               ToolTip="Overlays subtle VFD glass and scanline texture."/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="4" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="Playback"/>
+                    <Slider x:Name="PlaybackSlider" Width="360" Minimum="0" Maximum="0" Value="0" Margin="8,0,8,0"
+                            IsMoveToPointEnabled="True"
+                            ValueChanged="PlaybackSlider_ValueChanged"
+                            PreviewMouseLeftButtonUp="PlaybackSlider_SeekCommitted"
+                            ToolTip="Playback position. Drag or click to seek."/>
+                    <TextBlock x:Name="PlaybackPositionText" Text="00:00 / 00:00" Foreground="#9FB0C1" MinWidth="94"/>
                 </StackPanel>
             </Grid>
         </Border>

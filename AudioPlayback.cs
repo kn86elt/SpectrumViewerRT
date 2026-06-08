@@ -20,8 +20,10 @@ public sealed class AudioPlayback : IDisposable
     {
         _callback = OnWaveOut;
         var format = AudioInterop.Pcm16Mono(AudioCapture.SampleRate);
-        var result = AudioInterop.waveOutOpen(out _handle, AudioInterop.WaveMapper, ref format, _callback, IntPtr.Zero, AudioInterop.CallbackFunction);
-        _open = result == 0;
+        ThrowIfFailed(
+            AudioInterop.waveOutOpen(out _handle, AudioInterop.WaveMapper, ref format, _callback, IntPtr.Zero, AudioInterop.CallbackFunction),
+            "waveOutOpen");
+        _open = true;
     }
 
     public void Play(short[] samples)
@@ -44,8 +46,21 @@ public sealed class AudioPlayback : IDisposable
         Marshal.StructureToPtr(header, headerPtr, false);
         _pending.Enqueue(new PendingBuffer { HeaderPtr = headerPtr, DataPtr = dataPtr });
 
-        AudioInterop.waveOutPrepareHeader(_handle, headerPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>());
-        AudioInterop.waveOutWrite(_handle, headerPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>());
+        try
+        {
+            ThrowIfFailed(
+                AudioInterop.waveOutPrepareHeader(_handle, headerPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>()),
+                "waveOutPrepareHeader");
+            ThrowIfFailed(
+                AudioInterop.waveOutWrite(_handle, headerPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>()),
+                "waveOutWrite");
+        }
+        catch
+        {
+            if (_pending.TryDequeue(out var buffer))
+                Free(buffer);
+            throw;
+        }
     }
 
     public void Reset()
@@ -72,6 +87,12 @@ public sealed class AudioPlayback : IDisposable
             AudioInterop.waveOutUnprepareHeader(_handle, buffer.HeaderPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>());
         Marshal.FreeHGlobal(buffer.DataPtr);
         Marshal.FreeHGlobal(buffer.HeaderPtr);
+    }
+
+    private static void ThrowIfFailed(uint result, string operation)
+    {
+        if (result != 0)
+            throw new InvalidOperationException($"{operation} failed: {result}");
     }
 
     public void Dispose()
