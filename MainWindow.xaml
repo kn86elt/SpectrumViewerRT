@@ -175,7 +175,8 @@
                 <TextBlock Text="Source" FontWeight="SemiBold"/>
                 <ComboBox x:Name="ModeCombo" Grid.Column="1" SelectionChanged="ModeCombo_SelectionChanged"/>
                 <TextBlock Grid.Column="2" Text="Device" FontWeight="SemiBold"/>
-                <ComboBox x:Name="DeviceCombo" Grid.Column="3" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"/>
+                <ComboBox x:Name="DeviceCombo" Grid.Column="3" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"
+                          SelectionChanged="DeviceCombo_SelectionChanged"/>
                 <StackPanel Grid.Column="4" Orientation="Horizontal">
                     <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click"/>
                     <Button x:Name="StartButton" Content="Record" Click="StartButton_Click"/>
@@ -187,6 +188,7 @@
 
                 <StackPanel Grid.Row="1" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,12,0,0">
                     <CheckBox x:Name="MonitorCheck" Content="Monitor" Foreground="#E6EDF3" VerticalAlignment="Center" Margin="0,0,18,0"
+                              Visibility="Collapsed"
                               Checked="MonitorCheck_Changed" Unchecked="MonitorCheck_Changed"
                               ToolTip="Starts live display without recording."/>
                     <TextBlock Text="Gain"/>

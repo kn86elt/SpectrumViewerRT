@@ -52,6 +52,7 @@ public partial class MainWindow : Window
     private bool _isRecording;
     private bool _isPlayingBack;
     private bool _changingMonitorCheck;
+    private bool _refreshingDevices;
     private bool _updatingPlaybackSlider;
     private bool _loadingSettings;
     private bool _resettingDisplay;
@@ -112,6 +113,7 @@ public partial class MainWindow : Window
         UpdateControlLabels();
         UpdateGridOverlay();
         TriggerVfdFullScaleDecay();
+        BeginCapture(record: false, clearRecording: false);
     }
 
     private CaptureMode SelectedMode =>
@@ -122,25 +124,38 @@ public partial class MainWindow : Window
         if (!_uiReady)
             return;
 
-        if (_capture != null && !_isRecording)
-            StopLiveMonitor();
         RefreshDevices();
+        RestartCaptureForSelectedSource();
         if (!_loadingSettings)
             SaveSettings();
     }
 
-    private void RefreshButton_Click(object sender, RoutedEventArgs e) => RefreshDevices();
+    private void DeviceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady || _refreshingDevices)
+            return;
 
-    private void StartButton_Click(object sender, RoutedEventArgs e) => BeginCapture(record: true);
+        RestartCaptureForSelectedSource();
+    }
 
-    private void BeginCapture(bool record)
+    private void RefreshButton_Click(object sender, RoutedEventArgs e)
+    {
+        bool wasCapturing = _capture != null || _isRecording;
+        RefreshDevices();
+        if (wasCapturing && !_isPlayingBack)
+            RestartCaptureForSelectedSource();
+    }
+
+    private void StartButton_Click(object sender, RoutedEventArgs e) => BeginCapture(record: true, clearRecording: true);
+
+    private void BeginCapture(bool record, bool clearRecording = true)
     {
         try
         {
-            StopPlayback(updateStatus: false);
+            StopPlayback(updateStatus: false, restartLive: false);
             StopCapture(triggerVfdDecay: false);
             CancelVfdDecay();
-            if (record)
+            if (record && clearRecording)
             {
                 _recorded.Clear();
                 _playbackSamples = Array.Empty<short>();
@@ -170,11 +185,8 @@ public partial class MainWindow : Window
             _renderTimer.Interval = TimeSpan.FromSeconds(1.0 / Math.Max(1.0, FpsSlider.Value));
             _renderTimer.Start();
 
-            StartButton.IsEnabled = !record;
-            StopButton.IsEnabled = true;
-            SetInputControlsEnabled(false);
-            PlayButton.IsEnabled = false;
-            SaveButton.IsEnabled = false;
+            SetInputControlsEnabled(true);
+            UpdateTransportButtons();
             SetStatus(record
                 ? (SelectedMode == CaptureMode.SystemOutput ? "Recording system output" : "Recording microphone")
                 : (SelectedMode == CaptureMode.SystemOutput ? "Monitoring system output" : "Monitoring microphone"));
@@ -182,7 +194,6 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             StopCapture(triggerVfdDecay: false);
-            SetMonitorChecked(false);
             SetStoppedState();
             SetStatus(ex.Message);
         }
@@ -207,10 +218,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        StopCapture();
-        SetMonitorChecked(false);
-        SetStoppedState();
-        SetStatus(_recorded.Count > 0 ? "Stopped" : "Ready");
+        if (_isRecording)
+        {
+            BeginCapture(record: false, clearRecording: false);
+            SetStatus(_recorded.Count > 0 ? "Recording stopped" : "Monitoring");
+        }
     }
 
     private void MonitorCheck_Changed(object sender, RoutedEventArgs e)
@@ -248,7 +260,7 @@ public partial class MainWindow : Window
 
     private void StartPlayback(int startOffset)
     {
-        StopPlayback(updateStatus: false);
+        StopPlayback(updateStatus: false, restartLive: false);
 
         var recorded = _recorded.ToArray();
         if (recorded.Length == 0)
@@ -258,6 +270,7 @@ public partial class MainWindow : Window
         startOffset = Math.Clamp(startOffset, 0, recorded.Length - 1);
 
         PreparePlaybackDisplay(startOffset);
+        StopCapture(triggerVfdDecay: false);
         try
         {
             _playbackTempFile = CreatePlaybackWaveFile(recorded);
@@ -277,24 +290,22 @@ public partial class MainWindow : Window
         _renderTimer.Start();
         _playbackTimer.Start();
         _playbackPlayer.Play();
-        StartButton.IsEnabled = false;
-        StopButton.IsEnabled = true;
-        PlayButton.IsEnabled = false;
-        SaveButton.IsEnabled = false;
+        UpdateTransportButtons();
         SetStatus("Playing recording");
     }
 
-    private void StopPlayback(bool updateStatus = true)
+    private void StopPlayback(bool updateStatus = true, bool restartLive = true)
     {
+        bool wasPlaying = _isPlayingBack;
         _playbackTimer.Stop();
         _playbackPlayer.Stop();
         _playbackPlayer.Close();
         _isPlayingBack = false;
         while (_pendingSamples.TryDequeue(out _)) { }
-        if (_capture == null)
-            _renderTimer.Stop();
         SetStoppedState();
         DeletePlaybackTempFile();
+        if (wasPlaying && restartLive)
+            BeginCapture(record: false, clearRecording: false);
         if (updateStatus)
             SetStatus(_recorded.Count > 0 ? "Playback stopped" : "Ready");
     }
@@ -305,13 +316,12 @@ public partial class MainWindow : Window
         _playbackPlayer.Stop();
         _playbackPlayer.Close();
         _isPlayingBack = false;
-        if (_capture == null)
-            _renderTimer.Stop();
         SetStoppedState();
         SetStatus(status);
         DeletePlaybackTempFile();
         if (completed)
             UpdatePlaybackPosition(_playbackSamples.Length);
+        BeginCapture(record: false, clearRecording: false);
     }
 
     private void PreparePlaybackDisplay(int startOffset)
@@ -804,23 +814,35 @@ public partial class MainWindow : Window
         if (DeviceCombo == null)
             return;
 
+        _refreshingDevices = true;
+        try
+        {
         if (SelectedMode == CaptureMode.SystemOutput)
         {
             DeviceCombo.ItemsSource = new[] { new AudioDevice(-1, "Default Windows output") };
             DeviceCombo.SelectedIndex = 0;
             DeviceCombo.IsEnabled = false;
-            MonitorCheck.IsEnabled = true;
             SetStatus("System output mode uses WASAPI loopback");
             return;
         }
 
+        int? previousDeviceId = DeviceCombo.SelectedItem is AudioDevice previous ? previous.Id : null;
         var devices = AudioCapture.GetInputDevices();
         DeviceCombo.ItemsSource = devices;
-        DeviceCombo.IsEnabled = true;
-        MonitorCheck.IsEnabled = true;
+        DeviceCombo.IsEnabled = devices.Count > 0;
         if (devices.Count > 0)
-            DeviceCombo.SelectedIndex = 0;
+        {
+            int selectedIndex = previousDeviceId.HasValue
+                ? devices.ToList().FindIndex(device => device.Id == previousDeviceId.Value)
+                : -1;
+            DeviceCombo.SelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+        }
         SetStatus(devices.Count > 0 ? $"{devices.Count} input device(s)" : "No input devices");
+        }
+        finally
+        {
+            _refreshingDevices = false;
+        }
     }
 
     private void ClearSpectrogram()
@@ -1056,6 +1078,15 @@ public partial class MainWindow : Window
         SetStatus("Ready");
     }
 
+    private void RestartCaptureForSelectedSource()
+    {
+        if (_isPlayingBack)
+            return;
+
+        bool record = _isRecording;
+        BeginCapture(record, clearRecording: false);
+    }
+
     private bool ShouldPlayMonitorAudio() =>
         false;
 
@@ -1068,11 +1099,17 @@ public partial class MainWindow : Window
 
     private void SetStoppedState()
     {
+        UpdateTransportButtons();
+    }
+
+    private void UpdateTransportButtons()
+    {
         StartButton.IsEnabled = true;
-        StopButton.IsEnabled = false;
+        StopButton.IsEnabled = _isRecording || _isPlayingBack;
         SetInputControlsEnabled(true);
-        PlayButton.IsEnabled = _recorded.Count > 0;
-        SaveButton.IsEnabled = _recorded.Count > 0;
+        PlayButton.IsEnabled = _recorded.Count > 0 && !_isRecording && !_isPlayingBack;
+        SaveButton.IsEnabled = _recorded.Count > 0 && !_isRecording && !_isPlayingBack;
+        StartButton.IsEnabled = !_isRecording && !_isPlayingBack;
         UpdatePlaybackSliderBounds();
     }
 
@@ -1407,7 +1444,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        StopPlayback(updateStatus: false);
+        StopPlayback(updateStatus: false, restartLive: false);
         StopCapture(triggerVfdDecay: false);
         CancelVfdDecay();
         base.OnClosed(e);
