@@ -57,6 +57,7 @@ public partial class MainWindow : Window
     private bool _loadingSettings;
     private bool _resettingDisplay;
     private bool _uiReady;
+    private double _recordGainMultiplier = 1.0;
     private DateTime _vfdDecayStarted;
     private bool _vfdDecayActive;
     private bool _meterOnlySizeApplied;
@@ -111,6 +112,7 @@ public partial class MainWindow : Window
         ApplyMeterOnlyState();
         Topmost = AlwaysOnTopCheck.IsChecked == true;
         UpdateControlLabels();
+        UpdateTransportLeds();
         UpdateGridOverlay();
         TriggerVfdFullScaleDecay();
         BeginCapture(record: false, clearRecording: false);
@@ -174,7 +176,7 @@ public partial class MainWindow : Window
             _isRecording = record;
             _capture = CreateCaptureSource();
             _capture.SamplesAvailable += Capture_SamplesAvailable;
-            _capture.LevelAvailable += level => _peak = Math.Max(_peak * 0.92, level);
+            _capture.LevelAvailable += level => _peak = Math.Max(_peak * 0.92, ApplyLevelGain(level));
             _capture.StereoLevelAvailable += Capture_StereoLevelAvailable;
             _capture.StatusAvailable += message => Dispatcher.BeginInvoke(() => SetStatus(message));
 
@@ -495,13 +497,14 @@ public partial class MainWindow : Window
         if (samples.Length == 0)
             return;
 
-        _pendingSamples.Enqueue(samples);
-        _monitor?.Play(samples);
+        var adjusted = ApplyRecordGain(samples);
+        _pendingSamples.Enqueue(adjusted);
+        _monitor?.Play(adjusted);
     }
 
     private void Capture_StereoLevelAvailable(LevelMeterReading level)
     {
-        _currentLevel = level;
+        _currentLevel = ApplyLevelGain(level);
         var now = DateTime.Now;
 
         if (level.Left >= _peakHoldLevel.Left)
@@ -524,7 +527,7 @@ public partial class MainWindow : Window
         {
             appended += samples.Length;
             if (_isRecording)
-                _recorded.AddRange(samples);
+                AddRecordedSamples(samples);
             _sampleWindow.AddRange(samples);
             _latestRenderSamples.AddRange(samples);
         }
@@ -559,6 +562,38 @@ public partial class MainWindow : Window
             : $"{(_isRecording ? "Record" : "Live")}: {(DateTime.Now - _recordingStarted):mm\\:ss}";
         _renderTimer.Interval = TimeSpan.FromSeconds(1.0 / Math.Max(1.0, FpsSlider.Value));
     }
+
+    private void AddRecordedSamples(short[] samples)
+    {
+        _recorded.AddRange(samples);
+    }
+
+    private short[] ApplyRecordGain(short[] samples)
+    {
+        double gain = RecordGainMultiplier;
+        if (Math.Abs(gain - 1.0) < 0.0001)
+            return samples;
+
+        var adjusted = new short[samples.Length];
+        for (int i = 0; i < samples.Length; i++)
+            adjusted[i] = ApplySampleGain(samples[i], gain);
+        return adjusted;
+    }
+
+    private double ApplyLevelGain(double level) => Math.Clamp(level * RecordGainMultiplier, 0, 2);
+
+    private LevelMeterReading ApplyLevelGain(LevelMeterReading level)
+    {
+        double gain = RecordGainMultiplier;
+        return new LevelMeterReading(
+            Math.Clamp(level.Left * gain, 0, 2),
+            Math.Clamp(level.Right * gain, 0, 2));
+    }
+
+    private double RecordGainMultiplier => System.Threading.Volatile.Read(ref _recordGainMultiplier);
+
+    private static short ApplySampleGain(short sample, double gain) =>
+        (short)Math.Clamp((int)Math.Round(sample * gain), short.MinValue, short.MaxValue);
 
     private void UpdateLevelMeter()
     {
@@ -1042,12 +1077,14 @@ public partial class MainWindow : Window
 
     private void UpdateControlLabels()
     {
-        if (GainValueText == null || RangeValueText == null || FpsValueText == null ||
-            TimeDivisionText == null || VisibleTimeText == null || GainSlider == null ||
+        if (GainValueText == null || RecordGainValueText == null || RangeValueText == null || FpsValueText == null ||
+            TimeDivisionText == null || VisibleTimeText == null || GainSlider == null || RecordGainSlider == null ||
             RangeSlider == null || FpsSlider == null || TimeDivisionSlider == null)
             return;
 
         GainValueText.Text = $"x{GainSlider.Value:0.0}";
+        RecordGainValueText.Text = $"{RecordGainSlider.Value:+0.0;-0.0;0.0} dB";
+        System.Threading.Volatile.Write(ref _recordGainMultiplier, Math.Pow(10.0, RecordGainSlider.Value / 20.0));
         RangeValueText.Text = $"{RangeSlider.Value:0} dB";
         FpsValueText.Text = $"{FpsSlider.Value:0} fps";
         TimeDivisionText.Text = $"{TimeDivisionSlider.Value:0.00} s";
@@ -1110,7 +1147,29 @@ public partial class MainWindow : Window
         PlayButton.IsEnabled = _recorded.Count > 0 && !_isRecording && !_isPlayingBack;
         SaveButton.IsEnabled = _recorded.Count > 0 && !_isRecording && !_isPlayingBack;
         StartButton.IsEnabled = !_isRecording && !_isPlayingBack;
+        UpdateTransportLeds();
         UpdatePlaybackSliderBounds();
+    }
+
+    private void UpdateTransportLeds()
+    {
+        if (RecordLed != null)
+        {
+            RecordLed.Fill = new SolidColorBrush(_isRecording ? Color.FromRgb(255, 48, 36) : Color.FromRgb(54, 16, 16));
+            RecordLed.Stroke = new SolidColorBrush(_isRecording ? Color.FromRgb(255, 128, 112) : Color.FromRgb(90, 27, 27));
+            RecordLed.Effect = _isRecording
+                ? new DropShadowEffect { Color = Color.FromRgb(255, 38, 28), BlurRadius = 8, ShadowDepth = 0, Opacity = 0.9 }
+                : null;
+        }
+
+        if (PlayLed != null)
+        {
+            PlayLed.Fill = new SolidColorBrush(_isPlayingBack ? Color.FromRgb(74, 235, 112) : Color.FromRgb(15, 44, 24));
+            PlayLed.Stroke = new SolidColorBrush(_isPlayingBack ? Color.FromRgb(164, 255, 184) : Color.FromRgb(28, 79, 43));
+            PlayLed.Effect = _isPlayingBack
+                ? new DropShadowEffect { Color = Color.FromRgb(80, 245, 122), BlurRadius = 8, ShadowDepth = 0, Opacity = 0.85 }
+                : null;
+        }
     }
 
     private void SetInputControlsEnabled(bool enabled)
@@ -1119,7 +1178,6 @@ public partial class MainWindow : Window
             return;
 
         ModeCombo.IsEnabled = enabled;
-        RefreshButton.IsEnabled = enabled;
         DeviceCombo.IsEnabled = enabled && SelectedMode == CaptureMode.Microphone;
     }
 
@@ -1203,6 +1261,7 @@ public partial class MainWindow : Window
     {
         ModeCombo.SelectedIndex = settings.SourceIndex;
         GainSlider.Value = settings.Gain;
+        RecordGainSlider.Value = settings.RecordGainDb;
         RangeSlider.Value = settings.RangeDb;
         FpsSlider.Value = settings.Fps;
         TimeDivisionSlider.Value = settings.TimeDivisionSeconds;
@@ -1225,6 +1284,7 @@ public partial class MainWindow : Window
     private AppSettings CurrentSettings() => new()
     {
         Gain = GainSlider.Value,
+        RecordGainDb = RecordGainSlider.Value,
         RangeDb = RangeSlider.Value,
         Fps = FpsSlider.Value,
         TimeDivisionSeconds = TimeDivisionSlider.Value,
@@ -1277,6 +1337,11 @@ public partial class MainWindow : Window
     private void GainSlider_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         GainSlider.Value = Defaults.Gain;
+    }
+
+    private void RecordGainSlider_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        RecordGainSlider.Value = Defaults.RecordGainDb;
     }
 
     private void RangeSlider_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)

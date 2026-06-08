@@ -152,6 +152,87 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="SliderRepeatButtonStyle" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Height="6"
+                                VerticalAlignment="Center"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Slider">
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Foreground" Value="#5D8E90"/>
+            <Setter Property="Background" Value="#252B31"/>
+            <Setter Property="BorderBrush" Value="#3C4650"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="{TemplateBinding Height}" SnapsToDevicePixels="True">
+                            <Track x:Name="PART_Track" VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge"
+                                                  Background="{TemplateBinding Foreground}"
+                                                  Style="{StaticResource SliderRepeatButtonStyle}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb x:Name="Thumb" Width="14" Height="22">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="ThumbBorder"
+                                                        Background="#69727A"
+                                                        BorderBrush="#303842"
+                                                        BorderThickness="1"
+                                                        CornerRadius="2">
+                                                    <Border Margin="4,3"
+                                                            Background="#CED5DB"
+                                                            CornerRadius="1"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ThumbBorder" Property="Background" Value="#7B858E"/>
+                                                        <Setter TargetName="ThumbBorder" Property="BorderBrush" Value="#48525C"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="ThumbBorder" Property="Background" Value="#87919A"/>
+                                                        <Setter TargetName="ThumbBorder" Property="BorderBrush" Value="#5C6872"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsEnabled" Value="False">
+                                                        <Setter TargetName="ThumbBorder" Property="Background" Value="#4A525A"/>
+                                                        <Setter TargetName="ThumbBorder" Property="BorderBrush" Value="#5C6670"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge"
+                                                  Background="{TemplateBinding Background}"
+                                                  Style="{StaticResource SliderRepeatButtonStyle}"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="#6FA5A7"/>
+                                <Setter Property="Background" Value="#303841"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#4A555F"/>
+                                <Setter Property="Background" Value="#20252B"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <DockPanel LastChildFill="True">
@@ -178,19 +259,56 @@
                 <ComboBox x:Name="DeviceCombo" Grid.Column="3" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"
                           SelectionChanged="DeviceCombo_SelectionChanged"/>
                 <StackPanel Grid.Column="4" Orientation="Horizontal">
-                    <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click"/>
-                    <Button x:Name="StartButton" Content="Record" Click="StartButton_Click"/>
+                    <Button x:Name="StartButton" Click="StartButton_Click">
+                        <Grid Width="64" Height="22">
+                            <Ellipse x:Name="RecordLed" Width="7" Height="7" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                     Fill="#361010" Stroke="#5A1B1B" StrokeThickness="1"/>
+                            <TextBlock Text="Record" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
                     <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" IsEnabled="False"/>
-                    <Button x:Name="PlayButton" Content="Play" Click="PlayButton_Click" IsEnabled="False"/>
+                    <Button x:Name="PlayButton" Click="PlayButton_Click" IsEnabled="False">
+                        <Grid Width="64" Height="22">
+                            <Ellipse x:Name="PlayLed" Width="7" Height="7" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                     Fill="#0F2C18" Stroke="#1C4F2B" StrokeThickness="1"/>
+                            <TextBlock Text="Play" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
                     <Button x:Name="SaveButton" Content="Save WAV" Click="SaveButton_Click" IsEnabled="False"/>
                     <Button x:Name="DefaultsButton" Content="Defaults" Click="DefaultsButton_Click"/>
                 </StackPanel>
 
-                <StackPanel Grid.Row="1" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,12,0,0">
+                <Grid Grid.Row="1" Grid.ColumnSpan="5" Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
                     <CheckBox x:Name="MonitorCheck" Content="Monitor" Foreground="#E6EDF3" VerticalAlignment="Center" Margin="0,0,18,0"
                               Visibility="Collapsed"
                               Checked="MonitorCheck_Changed" Unchecked="MonitorCheck_Changed"
                               ToolTip="Starts live display without recording."/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Status" Foreground="#65717D" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="StatusText" Text="Ready" Foreground="#9FB0C1" MinWidth="260"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <TextBlock Text="Rec Level"/>
+                        <Slider x:Name="RecordGainSlider" Width="130" Minimum="-24" Maximum="12" Value="0" TickFrequency="3" Margin="8,0,6,0"
+                                ValueChanged="ControlValue_Changed"
+                                MouseDoubleClick="RecordGainSlider_MouseDoubleClick"
+                                ToolTip="Recording gain applied to saved audio and live input displays."/>
+                        <TextBlock x:Name="RecordGainValueText" Text="0.0 dB" MinWidth="54" Foreground="#9FB0C1" Margin="0,0,20,0"/>
+                        <TextBlock Text="Playback"/>
+                        <Slider x:Name="PlaybackSlider" Width="360" Minimum="0" Maximum="0" Value="0" Margin="8,0,8,0"
+                                IsMoveToPointEnabled="True"
+                                ValueChanged="PlaybackSlider_ValueChanged"
+                                PreviewMouseLeftButtonUp="PlaybackSlider_SeekCommitted"
+                                ToolTip="Playback position. Drag or click to seek."/>
+                        <TextBlock x:Name="PlaybackPositionText" Text="00:00 / 00:00" Foreground="#9FB0C1" MinWidth="94"/>
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Grid.Row="2" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
                     <TextBlock Text="Gain"/>
                     <Slider x:Name="GainSlider" Width="118" Minimum="0.2" Maximum="8" Value="2.4" TickFrequency="0.2" Margin="8,0,6,0"
                             ValueChanged="ControlValue_Changed"
@@ -211,10 +329,9 @@
                             MouseDoubleClick="FpsSlider_MouseDoubleClick"
                             ToolTip="Render update rate. Higher FPS makes movement smoother but does not change the time scale."/>
                     <TextBlock x:Name="FpsValueText" Text="60 fps" MinWidth="48" Foreground="#9FB0C1" Margin="0,0,14,0"/>
-                    <TextBlock x:Name="StatusText" Text="Ready" Foreground="#9FB0C1"/>
                 </StackPanel>
 
-                <StackPanel Grid.Row="2" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                <StackPanel Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
                     <TextBlock Text="Max Hz"/>
                     <ComboBox x:Name="MaxFrequencyCombo" Width="100" MinWidth="100" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="MaxFrequencyCombo_MouseDoubleClick"/>
                     <CheckBox x:Name="GridCheck" Content="Grid" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
@@ -229,7 +346,7 @@
                     <TextBlock x:Name="VisibleTimeText" Text="37.5 s" Foreground="#9FB0C1" Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <StackPanel Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                <StackPanel Grid.Row="4" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
                     <TextBlock Text="Display"/>
                     <ComboBox x:Name="DisplayModeCombo" Width="140" MinWidth="140" Margin="8,0,18,0" SelectionChanged="DisplayModeCombo_SelectionChanged"/>
                     <TextBlock Text="Meter Color"/>
@@ -246,16 +363,6 @@
                     <CheckBox x:Name="TextureCheck" Content="Texture" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
                               Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
                               ToolTip="Overlays subtle VFD glass and scanline texture."/>
-                </StackPanel>
-
-                <StackPanel Grid.Row="4" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
-                    <TextBlock Text="Playback"/>
-                    <Slider x:Name="PlaybackSlider" Width="360" Minimum="0" Maximum="0" Value="0" Margin="8,0,8,0"
-                            IsMoveToPointEnabled="True"
-                            ValueChanged="PlaybackSlider_ValueChanged"
-                            PreviewMouseLeftButtonUp="PlaybackSlider_SeekCommitted"
-                            ToolTip="Playback position. Drag or click to seek."/>
-                    <TextBlock x:Name="PlaybackPositionText" Text="00:00 / 00:00" Foreground="#9FB0C1" MinWidth="94"/>
                 </StackPanel>
             </Grid>
         </Border>

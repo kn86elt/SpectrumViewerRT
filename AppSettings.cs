@@ -6,6 +6,7 @@ namespace SpectrumViewerRT;
 public sealed class AppSettings
 {
     public double Gain { get; set; } = Defaults.Gain;
+    public double RecordGainDb { get; set; } = Defaults.RecordGainDb;
     public double RangeDb { get; set; } = Defaults.RangeDb;
     public double Fps { get; set; } = Defaults.Fps;
     public double TimeDivisionSeconds { get; set; } = Defaults.TimeDivisionSeconds;
@@ -53,6 +54,7 @@ public sealed class AppSettings
     public AppSettings Sanitized()
     {
         Gain = Math.Clamp(Gain, Defaults.MinGain, Defaults.MaxGain);
+        RecordGainDb = Math.Clamp(RecordGainDb, Defaults.MinRecordGainDb, Defaults.MaxRecordGainDb);
         RangeDb = Math.Clamp(RangeDb, Defaults.MinRangeDb, Defaults.MaxRangeDb);
         Fps = Math.Clamp(Fps, Defaults.MinFps, Defaults.MaxFps);
         TimeDivisionSeconds = Math.Clamp(TimeDivisionSeconds, Defaults.MinTimeDivisionSeconds, Defaults.MaxTimeDivisionSeconds);
@@ -71,6 +73,9 @@ public static class Defaults
     public const double Gain = 2.4;
     public const double MinGain = 0.2;
     public const double MaxGain = 8.0;
+    public const double RecordGainDb = 0.0;
+    public const double MinRecordGainDb = -24.0;
+    public const double MaxRecordGainDb = 12.0;
     public const double RangeDb = 85.0;
     public const double MinRangeDb = 45.0;
     public const double MaxRangeDb = 120.0;
