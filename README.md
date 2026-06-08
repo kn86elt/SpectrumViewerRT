@@ -1,6 +1,6 @@
 # Spectrum Viewer RT
 
-Windows desktop app for realtime audio monitoring, recording, playback, WAV export, and scrolling color spectrogram display.
+Windows desktop app for realtime audio monitoring, recording, playback, WAV export, scrolling spectrogram display, and VFD-style spectrum analysis.
 
 ![Screenshot](screenshot.jpg)
 Spectrogram mode
@@ -13,7 +13,8 @@ Spectrum Analyzer mode
 
 - Microphone input capture
 - Windows default output capture with WASAPI loopback
-- Live spectrum display without recording
+- Always-on live monitoring of the selected source
+- Source/device switching while monitoring
 - Dark-blue to red spectrogram color map for clearer level differences
 - Linear / log frequency scale selector
 - Frequency limit selector
@@ -21,13 +22,15 @@ Spectrum Analyzer mode
 - Adjustable seconds per time division
 - Realtime waveform display
 - Stereo VFD-style level meter with peak hold
+- VU-style display normalization for analog-deck-like meter response
 - Customizable level meter color and block/fine-line style
+- Mono or left/right split spectrum analyzer
 - Time labels are drawn outside the spectrogram area
 - Realtime recording
-- Playback of recorded audio
-- WAV export
-- 48 kHz / 16-bit / mono processing path
-- Gain, display range, FPS controls, and visible-time readout
+- Smooth playback of recorded audio with seek bar
+- WAV export, including stereo WAV for System Output recordings
+- 48 kHz / 16-bit processing path
+- Recording level, display gain, display range, FPS controls, and visible-time readout
 - Settings are saved under `%AppData%\SpectrumViewerRT\settings.json`
 
 ## Run
@@ -60,17 +63,22 @@ Or start a locally published app:
 
 1. Select `Microphone` or `System Output` from `Source`.
 2. For `Microphone`, select the input device from `Device`.
-3. Turn on `Monitor` to show the live spectrogram without recording.
-4. Press `Record` to record while showing the spectrogram.
-5. Press `Stop`, then use `Play` or `Save WAV`.
+3. The selected source is monitored continuously.
+4. Adjust `Rec Level` to set the level used for recording and live input displays.
+5. Press `Record` to start recording, then `Stop` to return to live monitoring.
+6. Use `Play`, the playback seek bar, or `Save WAV` after recording.
 
-Changing `Range`, `Scale`, or `Max Hz` clears the current display and restarts drawing with the new settings. The waveform scrolls on the same time axis as the spectrogram. `Grid` toggles the frequency/time overlay, and `Grid Time/div` controls the horizontal time scale. The visible time width is `Grid Time/div x 10` and is shown as `Visible`.
+Changing `Range`, `Scale`, `Max Hz`, `Display`, or `Analyzer` clears the current display and restarts drawing with the new settings. The waveform scrolls on the same time axis as the spectrogram. `Grid` toggles the frequency/time overlay, and `Grid Time/div` controls the horizontal time scale. The visible time width is `Grid Time/div x 10` and is shown as `Visible`.
 
-`Gain` is an FFT input multiplier for spectrogram brightness. `Range` is spectrogram dynamic range in dB. `FPS` is the render update rate and controls movement smoothness.
+`Rec Level` changes the level of the recorded signal and the live input displays. It is not saved as an app setting. `Gain` is an FFT/display multiplier for spectrogram and analyzer brightness. `Range` is spectrogram dynamic range in dB. `FPS` is the render update rate and controls movement smoothness.
 
-Double-click a setting control to restore that control's default value, or press `Defaults` to restore all display settings.
+`VU` boosts only the level meter and spectrum analyzer display, making nominal levels touch 0 dB/red like an analog recorder. It does not change recorded audio.
 
-In `System Output` mode, the app captures the Windows default playback device with WASAPI loopback. `Monitor` starts live analysis, but it does not route system output back to the speakers again.
+`Analyzer` can be set to `Mono` or `Stereo L-R`. Stereo analyzer mode uses left/right split panels when stereo samples are available. Spectrogram and waveform display continue to use the mono display path.
+
+Double-click a setting control to restore that control's default value, or press `Default Settings` to restore display, meter, grid, and window settings.
+
+In `System Output` mode, the app captures the Windows default playback device with WASAPI loopback. System Output recordings are exported as 48 kHz / 16-bit stereo WAV files. Microphone recordings currently use the mono capture path.
 
 
 
