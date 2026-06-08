@@ -19,10 +19,16 @@ public partial class MainWindow : Window
     private const int WaveformWidth = 1200;
     private const int WaveformHeight = 140;
     private const int DisplaySampleRate = AudioCapture.DefaultSampleRate;
+    private const double DefaultRecordGainDb = 0.0;
 
     private readonly ConcurrentQueue<short[]> _pendingSamples = new();
+    private sealed record StereoPacket(short[] Left, short[] Right);
+    private readonly ConcurrentQueue<StereoPacket> _pendingStereoSamples = new();
     private readonly List<short> _sampleWindow = new(FftSize * 2);
+    private readonly List<short> _leftSampleWindow = new(FftSize * 2);
+    private readonly List<short> _rightSampleWindow = new(FftSize * 2);
     private readonly List<short> _recorded = new();
+    private readonly List<short> _recordedStereoInterleaved = new();
     private readonly DispatcherTimer _renderTimer = new();
     private readonly DispatcherTimer _vfdDecayTimer = new();
     private readonly WriteableBitmap _spectrogram;
@@ -35,6 +41,12 @@ public partial class MainWindow : Window
     private readonly double[] _analyzerLevels = new double[48];
     private readonly double[] _analyzerHolds = Enumerable.Repeat(-90.0, 48).ToArray();
     private readonly DateTime[] _analyzerHoldUntil = new DateTime[48];
+    private readonly double[] _leftAnalyzerLevels = new double[48];
+    private readonly double[] _leftAnalyzerHolds = Enumerable.Repeat(-90.0, 48).ToArray();
+    private readonly DateTime[] _leftAnalyzerHoldUntil = new DateTime[48];
+    private readonly double[] _rightAnalyzerLevels = new double[48];
+    private readonly double[] _rightAnalyzerHolds = Enumerable.Repeat(-90.0, 48).ToArray();
+    private readonly DateTime[] _rightAnalyzerHoldUntil = new DateTime[48];
     private IAudioCaptureSource? _capture;
     private AudioPlayback? _monitor;
     private readonly MediaPlayer _playbackPlayer = new();
@@ -50,6 +62,8 @@ public partial class MainWindow : Window
     private DateTime _leftPeakHoldUntil;
     private DateTime _rightPeakHoldUntil;
     private bool _isRecording;
+    private bool _recordingStereo;
+    private bool _recordedStereo;
     private bool _isPlayingBack;
     private bool _changingMonitorCheck;
     private bool _refreshingDevices;
@@ -58,6 +72,12 @@ public partial class MainWindow : Window
     private bool _resettingDisplay;
     private bool _uiReady;
     private double _recordGainMultiplier = 1.0;
+
+    private bool VuNormalizeEnabled => VuNormalizeCheck?.IsChecked == true;
+
+    private double VuDisplayGain => VuNormalizeEnabled ? Math.Pow(10.0, 6.0 / 20.0) : 1.0;
+
+    private double VuDisplayDbOffset => VuNormalizeEnabled ? 6.0 : 0.0;
     private DateTime _vfdDecayStarted;
     private bool _vfdDecayActive;
     private bool _meterOnlySizeApplied;
@@ -89,6 +109,8 @@ public partial class MainWindow : Window
         MeterStyleCombo.Items.Add("Fine Lines");
         DisplayModeCombo.Items.Add("Spectrogram");
         DisplayModeCombo.Items.Add("Spectrum Analyzer");
+        AnalyzerModeCombo.Items.Add("Mono");
+        AnalyzerModeCombo.Items.Add("Stereo L-R");
         ApplySettings(AppSettings.Load());
         _loadingSettings = false;
 
@@ -160,22 +182,30 @@ public partial class MainWindow : Window
             if (record && clearRecording)
             {
                 _recorded.Clear();
+                _recordedStereoInterleaved.Clear();
+                _recordedStereo = false;
                 _playbackSamples = Array.Empty<short>();
                 UpdatePlaybackSliderBounds();
             }
             _sampleWindow.Clear();
+            _leftSampleWindow.Clear();
+            _rightSampleWindow.Clear();
             _latestRenderSamples.Clear();
             _scrollColumnAccumulator = 0;
             _peak = 0;
             _currentLevel = default;
             _peakHoldLevel = default;
             while (_pendingSamples.TryDequeue(out _)) { }
+            while (_pendingStereoSamples.TryDequeue(out _)) { }
             ClearSpectrogram();
             ClearWaveform();
 
             _isRecording = record;
+            if (record && clearRecording)
+                _recordingStereo = SelectedMode == CaptureMode.SystemOutput;
             _capture = CreateCaptureSource();
             _capture.SamplesAvailable += Capture_SamplesAvailable;
+            _capture.StereoSamplesAvailable += Capture_StereoSamplesAvailable;
             _capture.LevelAvailable += level => _peak = Math.Max(_peak * 0.92, ApplyLevelGain(level));
             _capture.StereoLevelAvailable += Capture_StereoLevelAvailable;
             _capture.StatusAvailable += message => Dispatcher.BeginInvoke(() => SetStatus(message));
@@ -329,6 +359,8 @@ public partial class MainWindow : Window
     private void PreparePlaybackDisplay(int startOffset)
     {
         _sampleWindow.Clear();
+        _leftSampleWindow.Clear();
+        _rightSampleWindow.Clear();
         _latestRenderSamples.Clear();
         _scrollColumnAccumulator = 0;
         _peak = 0;
@@ -415,11 +447,13 @@ public partial class MainWindow : Window
         const int chunk = DisplaySampleRate / 20;
         while (_lastPlaybackSampleOffset < currentOffset)
         {
+            int startOffset = _lastPlaybackSampleOffset;
             int length = Math.Min(chunk, currentOffset - _lastPlaybackSampleOffset);
             var samples = new short[length];
             Array.Copy(_playbackSamples, _lastPlaybackSampleOffset, samples, 0, length);
             _lastPlaybackSampleOffset += length;
             EnqueuePlaybackSamples(samples, _lastPlaybackSampleOffset);
+            AppendPlaybackStereoWindow(startOffset, length);
         }
 
         UpdatePlaybackPosition(currentOffset);
@@ -435,11 +469,30 @@ public partial class MainWindow : Window
         _playbackPlayer.Play();
     }
 
+    private void AppendPlaybackStereoWindow(int startOffset, int length)
+    {
+        if (!_recordedStereo || _recordedStereoInterleaved.Count < (startOffset + length) * 2)
+            return;
+
+        for (int i = 0; i < length; i++)
+        {
+            int index = (startOffset + i) * 2;
+            _leftSampleWindow.Add(_recordedStereoInterleaved[index]);
+            _rightSampleWindow.Add(_recordedStereoInterleaved[index + 1]);
+        }
+
+        TrimSampleWindow(_leftSampleWindow);
+        TrimSampleWindow(_rightSampleWindow);
+    }
+
     private string CreatePlaybackWaveFile(short[] samples)
     {
         DeletePlaybackTempFile();
         string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"SpectrumViewerRT-playback-{Environment.ProcessId}.wav");
-        WaveFile.Save16BitMono(path, samples, DisplaySampleRate);
+        if (_recordedStereo && _recordedStereoInterleaved.Count >= samples.Length * 2)
+            WaveFile.Save16BitStereo(path, _recordedStereoInterleaved, DisplaySampleRate);
+        else
+            WaveFile.Save16BitMono(path, samples, DisplaySampleRate);
         return path;
     }
 
@@ -487,7 +540,10 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog(this) == true)
         {
-            WaveFile.Save16BitMono(dialog.FileName, _recorded, DisplaySampleRate);
+            if (_recordedStereo && _recordedStereoInterleaved.Count > 0)
+                WaveFile.Save16BitStereo(dialog.FileName, _recordedStereoInterleaved, DisplaySampleRate);
+            else
+                WaveFile.Save16BitMono(dialog.FileName, _recorded, DisplaySampleRate);
             SetStatus($"Saved: {dialog.FileName}");
         }
     }
@@ -500,6 +556,14 @@ public partial class MainWindow : Window
         var adjusted = ApplyRecordGain(samples);
         _pendingSamples.Enqueue(adjusted);
         _monitor?.Play(adjusted);
+    }
+
+    private void Capture_StereoSamplesAvailable(short[] left, short[] right)
+    {
+        if (left.Length == 0 || right.Length == 0)
+            return;
+
+        _pendingStereoSamples.Enqueue(new StereoPacket(ApplyRecordGain(left), ApplyRecordGain(right)));
     }
 
     private void Capture_StereoLevelAvailable(LevelMeterReading level)
@@ -532,8 +596,23 @@ public partial class MainWindow : Window
             _latestRenderSamples.AddRange(samples);
         }
 
+        while (_pendingStereoSamples.TryDequeue(out var stereo))
+        {
+            int length = Math.Min(stereo.Left.Length, stereo.Right.Length);
+            if (length == 0)
+                continue;
+
+            if (_isRecording && _recordingStereo)
+                AddRecordedStereoSamples(stereo.Left, stereo.Right, length);
+
+            AppendStereoWindow(_leftSampleWindow, stereo.Left, length);
+            AppendStereoWindow(_rightSampleWindow, stereo.Right, length);
+        }
+
         if (_sampleWindow.Count > FftSize * 2)
             _sampleWindow.RemoveRange(0, _sampleWindow.Count - FftSize * 2);
+        TrimSampleWindow(_leftSampleWindow);
+        TrimSampleWindow(_rightSampleWindow);
 
         if (appended > 0 && _sampleWindow.Count >= FftSize)
         {
@@ -566,6 +645,28 @@ public partial class MainWindow : Window
     private void AddRecordedSamples(short[] samples)
     {
         _recorded.AddRange(samples);
+    }
+
+    private void AddRecordedStereoSamples(short[] left, short[] right, int length)
+    {
+        _recordedStereo = true;
+        for (int i = 0; i < length; i++)
+        {
+            _recordedStereoInterleaved.Add(left[i]);
+            _recordedStereoInterleaved.Add(right[i]);
+        }
+    }
+
+    private static void AppendStereoWindow(List<short> window, short[] samples, int length)
+    {
+        for (int i = 0; i < length; i++)
+            window.Add(samples[i]);
+    }
+
+    private static void TrimSampleWindow(List<short> window)
+    {
+        if (window.Count > FftSize * 2)
+            window.RemoveRange(0, window.Count - FftSize * 2);
     }
 
     private short[] ApplyRecordGain(short[] samples)
@@ -605,10 +706,11 @@ public partial class MainWindow : Window
         if (now > _rightPeakHoldUntil)
             _peakHoldLevel = _peakHoldLevel with { Right = Math.Max(_currentLevel.Right, _peakHoldLevel.Right * decay) };
 
-        LevelMeter.LeftLevel = Math.Clamp(_currentLevel.Left, 0, 2);
-        LevelMeter.RightLevel = Math.Clamp(_currentLevel.Right, 0, 2);
-        LevelMeter.LeftPeakHold = Math.Clamp(_peakHoldLevel.Left, 0, 2);
-        LevelMeter.RightPeakHold = Math.Clamp(_peakHoldLevel.Right, 0, 2);
+        double displayGain = VuDisplayGain;
+        LevelMeter.LeftLevel = Math.Clamp(_currentLevel.Left * displayGain, 0, 2);
+        LevelMeter.RightLevel = Math.Clamp(_currentLevel.Right * displayGain, 0, 2);
+        LevelMeter.LeftPeakHold = Math.Clamp(_peakHoldLevel.Left * displayGain, 0, 2);
+        LevelMeter.RightPeakHold = Math.Clamp(_peakHoldLevel.Right * displayGain, 0, 2);
         LevelMeter.ColorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
         LevelMeter.MeterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
         LevelMeter.ShowUnlitSegments = ShowUnlitCheck.IsChecked == true;
@@ -621,59 +723,80 @@ public partial class MainWindow : Window
         if (_sampleWindow.Count < FftSize)
             return;
 
+        if (AnalyzerModeCombo.SelectedIndex == 1 && _leftSampleWindow.Count >= FftSize && _rightSampleWindow.Count >= FftSize)
+        {
+            ComputeAnalyzerLevels(_leftSampleWindow, _leftAnalyzerLevels, _leftAnalyzerHolds, _leftAnalyzerHoldUntil);
+            ComputeAnalyzerLevels(_rightSampleWindow, _rightAnalyzerLevels, _rightAnalyzerHolds, _rightAnalyzerHoldUntil);
+            UpdateSpectrumAnalyzerDisplay();
+            return;
+        }
+
+        ComputeAnalyzerLevels(_sampleWindow, _analyzerLevels, _analyzerHolds, _analyzerHoldUntil);
+        UpdateSpectrumAnalyzerDisplay();
+    }
+
+    private void ComputeAnalyzerLevels(List<short> samples, double[] levels, double[] holds, DateTime[] holdUntil)
+    {
         var real = new double[FftSize];
         var imaginary = new double[FftSize];
-        int start = _sampleWindow.Count - FftSize;
+        int start = samples.Count - FftSize;
         for (int i = 0; i < FftSize; i++)
         {
             double hann = 0.5 - 0.5 * Math.Cos(2.0 * Math.PI * i / (FftSize - 1));
-            real[i] = _sampleWindow[start + i] / 32768.0 * hann * GainSlider.Value;
+            real[i] = samples[start + i] / 32768.0 * hann * GainSlider.Value;
         }
 
         Fft.Transform(real, imaginary);
         var now = DateTime.Now;
-        for (int band = 0; band < _analyzerLevels.Length; band++)
+        for (int band = 0; band < levels.Length; band++)
         {
-            double startFrequency = 20.0 * Math.Pow(MaxFrequency / 20.0, band / (double)_analyzerLevels.Length);
-            double endFrequency = 20.0 * Math.Pow(MaxFrequency / 20.0, (band + 1) / (double)_analyzerLevels.Length);
+            double startFrequency = 20.0 * Math.Pow(MaxFrequency / 20.0, band / (double)levels.Length);
+            double endFrequency = 20.0 * Math.Pow(MaxFrequency / 20.0, (band + 1) / (double)levels.Length);
             int startBin = Math.Clamp((int)(startFrequency / DisplaySampleRate * FftSize), 1, FftSize / 2 - 2);
             int endBin = Math.Clamp((int)(endFrequency / DisplaySampleRate * FftSize), startBin + 1, FftSize / 2 - 1);
             double sum = 0;
             for (int bin = startBin; bin <= endBin; bin++)
                 sum += Magnitude(real, imaginary, bin);
             double magnitude = sum / Math.Max(1, endBin - startBin + 1) / (FftSize * 0.5);
-            double db = Math.Clamp(20.0 * Math.Log10(magnitude + 0.0000000001), -90, 14);
-            _analyzerLevels[band] = Math.Max(db, _analyzerLevels[band] - 2.0);
-            if (db >= _analyzerHolds[band])
+            double db = Math.Clamp(20.0 * Math.Log10(magnitude + 0.0000000001) + VuDisplayDbOffset, -90, 14);
+            levels[band] = Math.Max(db, levels[band] - 2.0);
+            if (db >= holds[band])
             {
-                _analyzerHolds[band] = db;
-                _analyzerHoldUntil[band] = now.AddMilliseconds(900);
+                holds[band] = db;
+                holdUntil[band] = now.AddMilliseconds(900);
             }
-            else if (now > _analyzerHoldUntil[band])
+            else if (now > holdUntil[band])
             {
-                _analyzerHolds[band] = Math.Max(_analyzerLevels[band], _analyzerHolds[band] - 1.2);
+                holds[band] = Math.Max(levels[band], holds[band] - 1.2);
             }
         }
-
-        UpdateSpectrumAnalyzerDisplay();
     }
 
     private void DecaySpectrumAnalyzerHolds(DateTime now)
     {
-        bool changed = false;
-        for (int band = 0; band < _analyzerHolds.Length; band++)
-        {
-            _analyzerLevels[band] = Math.Max(-90.0, _analyzerLevels[band] - 2.0);
-            if (now <= _analyzerHoldUntil[band])
-                continue;
-
-            double previous = _analyzerHolds[band];
-            _analyzerHolds[band] = Math.Max(_analyzerLevels[band], _analyzerHolds[band] - 1.2);
-            changed |= Math.Abs(previous - _analyzerHolds[band]) > 0.001;
-        }
+        bool changed = DecayAnalyzer(_analyzerLevels, _analyzerHolds, _analyzerHoldUntil, now);
+        changed |= DecayAnalyzer(_leftAnalyzerLevels, _leftAnalyzerHolds, _leftAnalyzerHoldUntil, now);
+        changed |= DecayAnalyzer(_rightAnalyzerLevels, _rightAnalyzerHolds, _rightAnalyzerHoldUntil, now);
 
         if (changed)
             UpdateSpectrumAnalyzerDisplay();
+    }
+
+    private static bool DecayAnalyzer(double[] levels, double[] holds, DateTime[] holdUntil, DateTime now)
+    {
+        bool changed = false;
+        for (int band = 0; band < holds.Length; band++)
+        {
+            levels[band] = Math.Max(-90.0, levels[band] - 2.0);
+            if (now <= holdUntil[band])
+                continue;
+
+            double previous = holds[band];
+            holds[band] = Math.Max(levels[band], holds[band] - 1.2);
+            changed |= Math.Abs(previous - holds[band]) > 0.001;
+        }
+
+        return changed;
     }
 
     private double PixelsPerSecond => ImageWidth / VisibleSeconds;
@@ -1203,6 +1326,12 @@ public partial class MainWindow : Window
         Array.Fill(_analyzerLevels, -90.0);
         Array.Fill(_analyzerHolds, -90.0);
         Array.Fill(_analyzerHoldUntil, DateTime.MinValue);
+        Array.Fill(_leftAnalyzerLevels, -90.0);
+        Array.Fill(_leftAnalyzerHolds, -90.0);
+        Array.Fill(_leftAnalyzerHoldUntil, DateTime.MinValue);
+        Array.Fill(_rightAnalyzerLevels, -90.0);
+        Array.Fill(_rightAnalyzerHolds, -90.0);
+        Array.Fill(_rightAnalyzerHoldUntil, DateTime.MinValue);
         UpdateSpectrumAnalyzerDisplay();
         _resettingDisplay = false;
     }
@@ -1254,6 +1383,10 @@ public partial class MainWindow : Window
 
         Array.Fill(_analyzerLevels, db);
         Array.Fill(_analyzerHolds, db);
+        Array.Fill(_leftAnalyzerLevels, db);
+        Array.Fill(_leftAnalyzerHolds, db);
+        Array.Fill(_rightAnalyzerLevels, db);
+        Array.Fill(_rightAnalyzerHolds, db);
         UpdateSpectrumAnalyzerDisplay();
     }
 
@@ -1261,7 +1394,7 @@ public partial class MainWindow : Window
     {
         ModeCombo.SelectedIndex = settings.SourceIndex;
         GainSlider.Value = settings.Gain;
-        RecordGainSlider.Value = settings.RecordGainDb;
+        RecordGainSlider.Value = DefaultRecordGainDb;
         RangeSlider.Value = settings.RangeDb;
         FpsSlider.Value = settings.Fps;
         TimeDivisionSlider.Value = settings.TimeDivisionSeconds;
@@ -1270,12 +1403,14 @@ public partial class MainWindow : Window
         MeterColorCombo.SelectedIndex = settings.MeterColorIndex;
         MeterStyleCombo.SelectedIndex = settings.MeterStyleIndex;
         DisplayModeCombo.SelectedIndex = settings.DisplayModeIndex;
+        AnalyzerModeCombo.SelectedIndex = settings.AnalyzerModeIndex;
         AlwaysOnTopCheck.IsChecked = settings.AlwaysOnTop;
         MeterOnlyCheck.IsChecked = settings.MeterOnly;
         GridCheck.IsChecked = settings.GridEnabled;
         ShowUnlitCheck.IsChecked = settings.ShowUnlitSegments;
         GlowCheck.IsChecked = settings.GlowEnabled;
         TextureCheck.IsChecked = settings.TextureEnabled;
+        VuNormalizeCheck.IsChecked = settings.VuNormalizeEnabled;
         LevelMeter.ColorTheme = settings.MeterColorIndex;
         LevelMeter.MeterStyle = settings.MeterStyleIndex;
         ApplyMeterVisualSettings();
@@ -1284,7 +1419,6 @@ public partial class MainWindow : Window
     private AppSettings CurrentSettings() => new()
     {
         Gain = GainSlider.Value,
-        RecordGainDb = RecordGainSlider.Value,
         RangeDb = RangeSlider.Value,
         Fps = FpsSlider.Value,
         TimeDivisionSeconds = TimeDivisionSlider.Value,
@@ -1294,12 +1428,14 @@ public partial class MainWindow : Window
         MeterColorIndex = MeterColorCombo.SelectedIndex,
         MeterStyleIndex = MeterStyleCombo.SelectedIndex,
         DisplayModeIndex = DisplayModeCombo.SelectedIndex,
+        AnalyzerModeIndex = AnalyzerModeCombo.SelectedIndex,
         AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true,
         MeterOnly = MeterOnlyCheck.IsChecked == true,
         GridEnabled = GridCheck.IsChecked == true,
         ShowUnlitSegments = ShowUnlitCheck.IsChecked == true,
         GlowEnabled = GlowCheck.IsChecked == true,
-        TextureEnabled = TextureCheck.IsChecked == true
+        TextureEnabled = TextureCheck.IsChecked == true,
+        VuNormalizeEnabled = VuNormalizeCheck.IsChecked == true
     };
 
     private void SaveSettings()
@@ -1341,7 +1477,7 @@ public partial class MainWindow : Window
 
     private void RecordGainSlider_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        RecordGainSlider.Value = Defaults.RecordGainDb;
+        RecordGainSlider.Value = DefaultRecordGainDb;
     }
 
     private void RangeSlider_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -1399,6 +1535,7 @@ public partial class MainWindow : Window
         LevelMeter.ShowUnlitSegments = ShowUnlitCheck.IsChecked == true;
         LevelMeter.GlowEnabled = GlowCheck.IsChecked == true;
         LevelMeter.TextureEnabled = TextureCheck.IsChecked == true;
+        UpdateLevelMeter();
         SpectrumAnalyzer.Update(
             _analyzerLevels,
             _analyzerHolds,
@@ -1411,6 +1548,21 @@ public partial class MainWindow : Window
 
     private void UpdateSpectrumAnalyzerDisplay()
     {
+        if (AnalyzerModeCombo.SelectedIndex == 1)
+        {
+            SpectrumAnalyzer.UpdateStereo(
+                _leftAnalyzerLevels,
+                _leftAnalyzerHolds,
+                _rightAnalyzerLevels,
+                _rightAnalyzerHolds,
+                Math.Max(0, MeterColorCombo.SelectedIndex),
+                Math.Max(0, MeterStyleCombo.SelectedIndex),
+                ShowUnlitCheck.IsChecked == true,
+                GlowCheck.IsChecked == true,
+                TextureCheck.IsChecked == true);
+            return;
+        }
+
         SpectrumAnalyzer.Update(
             _analyzerLevels,
             _analyzerHolds,
@@ -1419,6 +1571,15 @@ public partial class MainWindow : Window
             ShowUnlitCheck.IsChecked == true,
             GlowCheck.IsChecked == true,
             TextureCheck.IsChecked == true);
+    }
+
+    private void AnalyzerModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady)
+            return;
+
+        ResetDisplayHistory();
+        SaveSettings();
     }
 
     private void DisplayModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)

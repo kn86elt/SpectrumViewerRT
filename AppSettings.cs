@@ -6,7 +6,6 @@ namespace SpectrumViewerRT;
 public sealed class AppSettings
 {
     public double Gain { get; set; } = Defaults.Gain;
-    public double RecordGainDb { get; set; } = Defaults.RecordGainDb;
     public double RangeDb { get; set; } = Defaults.RangeDb;
     public double Fps { get; set; } = Defaults.Fps;
     public double TimeDivisionSeconds { get; set; } = Defaults.TimeDivisionSeconds;
@@ -16,12 +15,14 @@ public sealed class AppSettings
     public int MeterColorIndex { get; set; } = Defaults.MeterColorIndex;
     public int MeterStyleIndex { get; set; } = Defaults.MeterStyleIndex;
     public int DisplayModeIndex { get; set; } = Defaults.DisplayModeIndex;
+    public int AnalyzerModeIndex { get; set; } = Defaults.AnalyzerModeIndex;
     public bool AlwaysOnTop { get; set; } = Defaults.AlwaysOnTop;
     public bool MeterOnly { get; set; } = Defaults.MeterOnly;
     public bool GridEnabled { get; set; } = Defaults.GridEnabled;
     public bool ShowUnlitSegments { get; set; } = Defaults.ShowUnlitSegments;
     public bool GlowEnabled { get; set; } = Defaults.GlowEnabled;
     public bool TextureEnabled { get; set; } = Defaults.TextureEnabled;
+    public bool VuNormalizeEnabled { get; set; } = Defaults.VuNormalizeEnabled;
 
     public static string SettingsPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpectrumViewerRT", "settings.json");
@@ -54,7 +55,6 @@ public sealed class AppSettings
     public AppSettings Sanitized()
     {
         Gain = Math.Clamp(Gain, Defaults.MinGain, Defaults.MaxGain);
-        RecordGainDb = Math.Clamp(RecordGainDb, Defaults.MinRecordGainDb, Defaults.MaxRecordGainDb);
         RangeDb = Math.Clamp(RangeDb, Defaults.MinRangeDb, Defaults.MaxRangeDb);
         Fps = Math.Clamp(Fps, Defaults.MinFps, Defaults.MaxFps);
         TimeDivisionSeconds = Math.Clamp(TimeDivisionSeconds, Defaults.MinTimeDivisionSeconds, Defaults.MaxTimeDivisionSeconds);
@@ -64,6 +64,7 @@ public sealed class AppSettings
         MeterColorIndex = Math.Clamp(MeterColorIndex, 0, 3);
         MeterStyleIndex = Math.Clamp(MeterStyleIndex, 0, 1);
         DisplayModeIndex = Math.Clamp(DisplayModeIndex, 0, 1);
+        AnalyzerModeIndex = Math.Clamp(AnalyzerModeIndex, 0, 1);
         return this;
     }
 }
@@ -73,9 +74,6 @@ public static class Defaults
     public const double Gain = 2.4;
     public const double MinGain = 0.2;
     public const double MaxGain = 8.0;
-    public const double RecordGainDb = 0.0;
-    public const double MinRecordGainDb = -24.0;
-    public const double MaxRecordGainDb = 12.0;
     public const double RangeDb = 85.0;
     public const double MinRangeDb = 45.0;
     public const double MaxRangeDb = 120.0;
@@ -91,10 +89,12 @@ public static class Defaults
     public const int MeterColorIndex = 0;
     public const int MeterStyleIndex = 0;
     public const int DisplayModeIndex = 0;
+    public const int AnalyzerModeIndex = 0;
     public const bool GridEnabled = true;
     public const bool AlwaysOnTop = false;
     public const bool MeterOnly = false;
     public const bool ShowUnlitSegments = true;
     public const bool GlowEnabled = true;
     public const bool TextureEnabled = true;
+    public const bool VuNormalizeEnabled = false;
 }

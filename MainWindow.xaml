@@ -275,7 +275,6 @@
                         </Grid>
                     </Button>
                     <Button x:Name="SaveButton" Content="Save WAV" Click="SaveButton_Click" IsEnabled="False"/>
-                    <Button x:Name="DefaultsButton" Content="Defaults" Click="DefaultsButton_Click"/>
                 </StackPanel>
 
                 <Grid Grid.Row="1" Grid.ColumnSpan="5" Margin="0,12,0,0">
@@ -346,24 +345,36 @@
                     <TextBlock x:Name="VisibleTimeText" Text="37.5 s" Foreground="#9FB0C1" Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <StackPanel Grid.Row="4" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
-                    <TextBlock Text="Display"/>
-                    <ComboBox x:Name="DisplayModeCombo" Width="140" MinWidth="140" Margin="8,0,18,0" SelectionChanged="DisplayModeCombo_SelectionChanged"/>
-                    <TextBlock Text="Meter Color"/>
-                    <ComboBox x:Name="MeterColorCombo" Width="110" MinWidth="110" Margin="8,0,18,0" SelectionChanged="MeterSetting_Changed"/>
-                    <TextBlock Text="Meter Type"/>
-                    <ComboBox x:Name="MeterStyleCombo" Width="110" MinWidth="110" Margin="8,0,18,0" SelectionChanged="MeterSetting_Changed"/>
-                    <CheckBox x:Name="ShowUnlitCheck" Content="Dim off" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
-                              Margin="0,0,18,0" Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
-                              ToolTip="Shows inactive VFD segments very faintly."/>
-                    <CheckBox x:Name="GlowCheck" Content="Glow" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
-                              Margin="0,0,18,0"
-                              Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
-                              ToolTip="Adds a soft glow around active VFD segments."/>
-                    <CheckBox x:Name="TextureCheck" Content="Texture" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
-                              Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
-                              ToolTip="Overlays subtle VFD glass and scanline texture."/>
-                </StackPanel>
+                <DockPanel Grid.Row="4" Grid.ColumnSpan="5" Margin="0,10,0,0" LastChildFill="True">
+                    <Button x:Name="DefaultsButton" Content="Default Settings"
+                            DockPanel.Dock="Right"
+                            Click="DefaultsButton_Click"
+                            Margin="12,0,0,0"
+                            ToolTip="Restore display, meter, grid, and window settings to defaults."/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Display"/>
+                        <ComboBox x:Name="DisplayModeCombo" Width="132" MinWidth="132" Margin="8,0,14,0" SelectionChanged="DisplayModeCombo_SelectionChanged"/>
+                        <TextBlock Text="Analyzer"/>
+                        <ComboBox x:Name="AnalyzerModeCombo" Width="112" MinWidth="112" Margin="8,0,14,0" SelectionChanged="AnalyzerModeCombo_SelectionChanged"/>
+                        <TextBlock Text="Color"/>
+                        <ComboBox x:Name="MeterColorCombo" Width="96" MinWidth="96" Margin="8,0,14,0" SelectionChanged="MeterSetting_Changed"/>
+                        <TextBlock Text="Meter"/>
+                        <ComboBox x:Name="MeterStyleCombo" Width="96" MinWidth="96" Margin="8,0,14,0" SelectionChanged="MeterSetting_Changed"/>
+                        <CheckBox x:Name="VuNormalizeCheck" Content="VU" IsChecked="False" Foreground="#E6EDF3" VerticalAlignment="Center"
+                                  Margin="0,0,12,0" Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
+                                  ToolTip="Boost meter and analyzer display only, so nominal levels touch 0 dB/red like an analog deck."/>
+                        <CheckBox x:Name="ShowUnlitCheck" Content="Dim" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
+                                  Margin="0,0,12,0" Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
+                                  ToolTip="Shows inactive VFD segments very faintly."/>
+                        <CheckBox x:Name="GlowCheck" Content="Glow" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
+                                  Margin="0,0,12,0"
+                                  Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
+                                  ToolTip="Adds a soft glow around active VFD segments."/>
+                        <CheckBox x:Name="TextureCheck" Content="Texture" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
+                                  Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
+                                  ToolTip="Overlays subtle VFD glass and scanline texture."/>
+                    </StackPanel>
+                </DockPanel>
             </Grid>
         </Border>
 

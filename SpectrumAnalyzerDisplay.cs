@@ -8,6 +8,9 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 {
     private double[] _levels = Array.Empty<double>();
     private double[] _holds = Array.Empty<double>();
+    private double[] _rightLevels = Array.Empty<double>();
+    private double[] _rightHolds = Array.Empty<double>();
+    private bool _stereo;
 
     public int ColorTheme { get; set; }
     public int MeterStyle { get; set; }
@@ -19,12 +22,31 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
     {
         _levels = levels;
         _holds = holds;
+        _rightLevels = Array.Empty<double>();
+        _rightHolds = Array.Empty<double>();
+        _stereo = false;
+        ApplyVisualSettings(colorTheme, meterStyle, showUnlitSegments, glowEnabled, textureEnabled);
+        InvalidateVisual();
+    }
+
+    public void UpdateStereo(double[] leftLevels, double[] leftHolds, double[] rightLevels, double[] rightHolds, int colorTheme, int meterStyle, bool showUnlitSegments, bool glowEnabled, bool textureEnabled)
+    {
+        _levels = leftLevels;
+        _holds = leftHolds;
+        _rightLevels = rightLevels;
+        _rightHolds = rightHolds;
+        _stereo = true;
+        ApplyVisualSettings(colorTheme, meterStyle, showUnlitSegments, glowEnabled, textureEnabled);
+        InvalidateVisual();
+    }
+
+    private void ApplyVisualSettings(int colorTheme, int meterStyle, bool showUnlitSegments, bool glowEnabled, bool textureEnabled)
+    {
         ColorTheme = colorTheme;
         MeterStyle = meterStyle;
         ShowUnlitSegments = showUnlitSegments;
         GlowEnabled = glowEnabled;
         TextureEnabled = textureEnabled;
-        InvalidateVisual();
     }
 
     protected override void OnRender(DrawingContext dc)
@@ -36,16 +58,34 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         if (_levels.Length == 0 || ActualWidth < 40 || ActualHeight < 40)
             return;
 
-        double left = 44;
-        double right = ActualWidth - 14;
+        if (_stereo && _rightLevels.Length > 0)
+        {
+            double gap = 24;
+            double panelWidth = Math.Max(1, (ActualWidth - gap) / 2.0);
+            DrawAnalyzerPanel(dc, _levels, _holds, new Rect(0, 0, panelWidth, ActualHeight), "L");
+            DrawAnalyzerPanel(dc, _rightLevels, _rightHolds, new Rect(panelWidth + gap, 0, panelWidth - gap, ActualHeight), "R");
+            DrawTexture(dc, bounds);
+            return;
+        }
+
+        DrawAnalyzerPanel(dc, _levels, _holds, bounds, string.Empty);
+        DrawTexture(dc, bounds);
+    }
+
+    private void DrawAnalyzerPanel(DrawingContext dc, double[] levels, double[] holds, Rect bounds, string label)
+    {
+        double left = bounds.Left + 44;
+        double right = bounds.Right - 14;
         double top = 16;
-        double bottom = ActualHeight - 30;
+        double bottom = bounds.Bottom - 30;
         double width = Math.Max(1, right - left);
         double height = Math.Max(1, bottom - top);
 
         DrawDbGrid(dc, left, top, width, height);
+        if (!string.IsNullOrEmpty(label))
+            DrawText(dc, label, bounds.Left + 14, top + 4, 14, Color.FromRgb(190, 226, 226));
 
-        int bands = _levels.Length;
+        int bands = levels.Length;
         double gap = 3;
         double bandWidth = Math.Max(3, (width - gap * (bands - 1)) / bands);
         int rows = 22;
@@ -55,8 +95,8 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         for (int band = 0; band < bands; band++)
         {
             double x = left + band * (bandWidth + gap);
-            double db = _levels[band];
-            double holdDb = band < _holds.Length ? _holds[band] : -90;
+            double db = levels[band];
+            double holdDb = band < holds.Length ? holds[band] : -90;
             int litRows = DbToRows(db, rows);
             int holdRow = Math.Clamp(DbToRows(holdDb, rows) - 1, 0, rows - 1);
 
@@ -75,7 +115,6 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         }
 
         DrawFrequencyLabels(dc, left, bottom + 7, width);
-        DrawTexture(dc, bounds);
     }
 
     private void DrawDbGrid(DrawingContext dc, double left, double top, double width, double height)

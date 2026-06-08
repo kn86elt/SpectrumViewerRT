@@ -15,6 +15,7 @@ public sealed class AudioCapture : IAudioCaptureSource
     public const int DefaultSampleRate = 48000;
     public const int SampleRate = DefaultSampleRate;
     public event Action<short[]>? SamplesAvailable;
+    public event Action<short[], short[]>? StereoSamplesAvailable;
     public event Action<double>? LevelAvailable;
     public event Action<LevelMeterReading>? StereoLevelAvailable;
     public event Action<string>? StatusAvailable;
@@ -141,6 +142,7 @@ public sealed class AudioCapture : IAudioCaptureSource
             peak = Math.Max(peak, Math.Abs(samples[i] / 32768.0));
 
         SamplesAvailable?.Invoke(samples);
+        StereoSamplesAvailable?.Invoke(samples, samples);
         LevelAvailable?.Invoke(peak);
         StereoLevelAvailable?.Invoke(LevelMeterReading.Mono(peak));
 

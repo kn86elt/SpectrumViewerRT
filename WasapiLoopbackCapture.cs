@@ -4,14 +4,19 @@ namespace SpectrumViewerRT;
 
 public sealed class WasapiLoopbackCapture : IAudioCaptureSource
 {
+    private sealed record PacketSamples(short[] Mono, short[] Left, short[] Right);
+
     private const int OutputSampleRate = AudioCapture.DefaultSampleRate;
     private volatile bool _running;
     private Thread? _thread;
     private double _resamplePosition;
     private double _lastMono;
+    private double _lastLeft;
+    private double _lastRight;
     private LevelMeterReading _lastLevel;
 
     public event Action<short[]>? SamplesAvailable;
+    public event Action<short[], short[]>? StereoSamplesAvailable;
     public event Action<double>? LevelAvailable;
     public event Action<LevelMeterReading>? StereoLevelAvailable;
     public event Action<string>? StatusAvailable;
@@ -101,9 +106,10 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
                         try
                         {
                             var samples = ConvertPacket(data, (int)frames, channels, blockAlign, bits, float32, sourceRate, bufferFlags.HasFlag(WasapiInterop.AudioClientBufferFlags.Silent));
-                            if (samples.Length > 0)
+                            if (samples.Mono.Length > 0)
                             {
-                                SamplesAvailable?.Invoke(samples);
+                                SamplesAvailable?.Invoke(samples.Mono);
+                                StereoSamplesAvailable?.Invoke(samples.Left, samples.Right);
                                 LevelAvailable?.Invoke(_lastLevel.Peak);
                                 StereoLevelAvailable?.Invoke(_lastLevel);
                             }
@@ -147,12 +153,14 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         }
     }
 
-    private short[] ConvertPacket(IntPtr data, int frames, int channels, int blockAlign, int bits, bool float32, int sourceRate, bool silent)
+    private PacketSamples ConvertPacket(IntPtr data, int frames, int channels, int blockAlign, int bits, bool float32, int sourceRate, bool silent)
     {
         if (frames <= 0)
-            return Array.Empty<short>();
+            return new PacketSamples(Array.Empty<short>(), Array.Empty<short>(), Array.Empty<short>());
 
         var mono = new double[frames];
+        var left = new double[frames];
+        var right = new double[frames];
         double leftPeak = 0;
         double rightPeak = 0;
         if (!silent)
@@ -165,6 +173,8 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
             {
                 double sum = 0;
                 int frameOffset = frame * blockAlign;
+                double leftValue = 0;
+                double rightValue = 0;
                 for (int channel = 0; channel < channels; channel++)
                 {
                     int offset = frameOffset + channel * (bits / 8);
@@ -172,11 +182,21 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
                     sum += value;
 
                     if (channel == 0)
+                    {
+                        leftValue = value;
                         leftPeak = Math.Max(leftPeak, Math.Abs(value));
+                    }
                     else if (channel == 1)
+                    {
+                        rightValue = value;
                         rightPeak = Math.Max(rightPeak, Math.Abs(value));
+                    }
                 }
 
+                if (channels == 1)
+                    rightValue = leftValue;
+                left[frame] = leftValue;
+                right[frame] = rightValue;
                 mono[frame] = sum / channels;
             }
         }
@@ -184,31 +204,41 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         if (channels == 1)
             rightPeak = leftPeak;
         _lastLevel = new LevelMeterReading(leftPeak, rightPeak);
-        return ResampleToOutput(mono, sourceRate);
+        return ResampleToOutput(mono, left, right, sourceRate);
     }
 
-    private short[] ResampleToOutput(double[] mono, int sourceRate)
+    private PacketSamples ResampleToOutput(double[] mono, double[] left, double[] right, int sourceRate)
     {
         if (mono.Length == 0)
-            return Array.Empty<short>();
+            return new PacketSamples(Array.Empty<short>(), Array.Empty<short>(), Array.Empty<short>());
 
         double step = sourceRate / (double)OutputSampleRate;
-        var output = new List<short>((int)(mono.Length / step) + 2);
+        var monoOutput = new List<short>((int)(mono.Length / step) + 2);
+        var leftOutput = new List<short>((int)(left.Length / step) + 2);
+        var rightOutput = new List<short>((int)(right.Length / step) + 2);
 
         while (_resamplePosition < mono.Length)
         {
             int index = (int)_resamplePosition;
             double fraction = _resamplePosition - index;
-            double a = index == 0 ? _lastMono : mono[index - 1];
-            double b = mono[Math.Min(index, mono.Length - 1)];
-            double sample = a + (b - a) * fraction;
-            output.Add(ToInt16(sample));
+            monoOutput.Add(ToInt16(Interpolate(mono, _lastMono, index, fraction)));
+            leftOutput.Add(ToInt16(Interpolate(left, _lastLeft, index, fraction)));
+            rightOutput.Add(ToInt16(Interpolate(right, _lastRight, index, fraction)));
             _resamplePosition += step;
         }
 
         _resamplePosition -= mono.Length;
         _lastMono = mono[^1];
-        return output.ToArray();
+        _lastLeft = left[^1];
+        _lastRight = right[^1];
+        return new PacketSamples(monoOutput.ToArray(), leftOutput.ToArray(), rightOutput.ToArray());
+    }
+
+    private static double Interpolate(double[] samples, double previous, int index, double fraction)
+    {
+        double a = index == 0 ? previous : samples[index - 1];
+        double b = samples[Math.Min(index, samples.Length - 1)];
+        return a + (b - a) * fraction;
     }
 
     private static double ReadSample(byte[] raw, int offset, int bits, bool float32)
