@@ -63,7 +63,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
             double gap = 24;
             double panelWidth = Math.Max(1, (ActualWidth - gap) / 2.0);
             DrawAnalyzerPanel(dc, _levels, _holds, new Rect(0, 0, panelWidth, ActualHeight), "L");
-            DrawAnalyzerPanel(dc, _rightLevels, _rightHolds, new Rect(panelWidth + gap, 0, panelWidth - gap, ActualHeight), "R");
+            DrawAnalyzerPanel(dc, _rightLevels, _rightHolds, new Rect(panelWidth + gap, 0, panelWidth, ActualHeight), "R");
             DrawTexture(dc, bounds);
             return;
         }
@@ -76,14 +76,14 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
     {
         double left = bounds.Left + 44;
         double right = bounds.Right - 14;
-        double top = 16;
+        double top = string.IsNullOrEmpty(label) ? 16 : 30;
         double bottom = bounds.Bottom - 30;
         double width = Math.Max(1, right - left);
         double height = Math.Max(1, bottom - top);
 
-        DrawDbGrid(dc, left, top, width, height);
+        DrawDbGrid(dc, bounds.Left + 8, left, top, width, height);
         if (!string.IsNullOrEmpty(label))
-            DrawText(dc, label, bounds.Left + 14, top + 4, 14, Color.FromRgb(190, 226, 226));
+            DrawTextCentered(dc, label, bounds.Left + bounds.Width / 2.0, 5, 14, ActiveColor());
 
         int bands = levels.Length;
         double gap = 3;
@@ -117,13 +117,13 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         DrawFrequencyLabels(dc, left, bottom + 7, width);
     }
 
-    private void DrawDbGrid(DrawingContext dc, double left, double top, double width, double height)
+    private void DrawDbGrid(DrawingContext dc, double labelX, double left, double top, double width, double height)
     {
         foreach (double db in new[] { -60.0, -40.0, -20.0, 0.0, 12.0 })
         {
             double y = top + (1.0 - DbToNormalized(db)) * height;
             dc.DrawLine(new Pen(new SolidColorBrush(Color.FromRgb(38, 52, 62)), 1) { DashStyle = DashStyles.Dot }, new Point(left, y), new Point(left + width, y));
-            DrawText(dc, db.ToString("0", CultureInfo.InvariantCulture), 8, y - 7, 11, Color.FromRgb(160, 235, 230));
+            DrawText(dc, db.ToString("0", CultureInfo.InvariantCulture), labelX, y - 7, 11, ActiveColor());
         }
     }
 
@@ -133,7 +133,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         for (int i = 0; i < labels.Length; i++)
         {
             double x = left + i / (double)(labels.Length - 1) * width;
-            DrawText(dc, labels[i], x - 10, y, 11, Color.FromRgb(160, 235, 230));
+            DrawTextCentered(dc, labels[i], x, y, 11, ActiveColor());
         }
     }
 
@@ -246,7 +246,35 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
     private void DrawText(DrawingContext dc, string text, double x, double y, double size, Color color)
     {
-        var formatted = new FormattedText(
+        var formatted = CreateFormattedText(text, size, color);
+
+        if (GlowEnabled)
+        {
+            var glowText = CreateFormattedText(text, size, WithAlpha(color, 60));
+            foreach (var offset in new[] { new Point(-1, 0), new Point(1, 0), new Point(0, -1), new Point(0, 1), new Point(-1, -1), new Point(1, 1) })
+                dc.DrawText(glowText, new Point(x + offset.X, y + offset.Y));
+        }
+
+        dc.DrawText(formatted, new Point(x, y));
+    }
+
+    private void DrawTextCentered(DrawingContext dc, string text, double centerX, double y, double size, Color color)
+    {
+        var formatted = CreateFormattedText(text, size, color);
+        double x = centerX - formatted.Width / 2.0;
+
+        if (GlowEnabled)
+        {
+            var glowText = CreateFormattedText(text, size, WithAlpha(color, 60));
+            foreach (var offset in new[] { new Point(-1, 0), new Point(1, 0), new Point(0, -1), new Point(0, 1), new Point(-1, -1), new Point(1, 1) })
+                dc.DrawText(glowText, new Point(x + offset.X, y + offset.Y));
+        }
+
+        dc.DrawText(formatted, new Point(x, y));
+    }
+
+    private FormattedText CreateFormattedText(string text, double size, Color color) =>
+        new(
             text,
             CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
@@ -254,6 +282,4 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
             size,
             new SolidColorBrush(color),
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
-        dc.DrawText(formatted, new Point(x, y));
-    }
 }

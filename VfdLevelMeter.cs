@@ -123,7 +123,7 @@ public sealed class VfdLevelMeter : FrameworkElement
 
     private void DrawRow(DrawingContext dc, string label, double level, double peakHold, double x, double y, double width, double height)
     {
-        DrawText(dc, label, 9, y - 1, 10, Color.FromRgb(168, 255, 244));
+        DrawText(dc, label, 9, y - 1, 10, ActiveColor());
 
         int segments = Math.Max(32, (int)(width / 8));
         double gap = 2;
@@ -192,7 +192,7 @@ public sealed class VfdLevelMeter : FrameworkElement
 
     private void DrawScale(DrawingContext dc, double x, double y, double width)
     {
-        DrawText(dc, "dB", x - 28, y - 1, 10, Color.FromRgb(183, 255, 246));
+        DrawText(dc, "dB", x - 28, y - 1, 10, ActiveColor());
         foreach (double mark in DbMarks)
         {
             double pos = x + DbToPosition(mark) * width;
