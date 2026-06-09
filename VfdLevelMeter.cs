@@ -123,7 +123,7 @@ public sealed class VfdLevelMeter : FrameworkElement
 
     private void DrawRow(DrawingContext dc, string label, double level, double peakHold, double x, double y, double width, double height)
     {
-        DrawText(dc, label, 9, y - 1, 10, ActiveColor());
+        DrawText(dc, label, 10, y, 9, ActiveColor());
 
         int segments = Math.Max(32, (int)(width / 8));
         double gap = 2;
@@ -192,13 +192,16 @@ public sealed class VfdLevelMeter : FrameworkElement
 
     private void DrawScale(DrawingContext dc, double x, double y, double width)
     {
-        DrawText(dc, "dB", x - 28, y - 1, 10, ActiveColor());
+        const double fontSize = 8;
+        DrawText(dc, "dB", x - 27, y, fontSize, ActiveColor());
         foreach (double mark in DbMarks)
         {
             double pos = x + DbToPosition(mark) * width;
             var color = mark >= 6 ? Color.FromRgb(255, 68, 42) : ActiveColor();
             string text = mark <= -60 ? "-inf" : mark.ToString("0", CultureInfo.InvariantCulture);
-            DrawText(dc, text, pos - 8, y, 10, color);
+            var formatted = CreateFormattedText(text, fontSize, color);
+            double textX = Math.Clamp(pos - formatted.Width / 2.0, x - 1, x + width - formatted.Width);
+            DrawText(dc, text, textX, y, fontSize, color);
         }
     }
 
@@ -271,7 +274,20 @@ public sealed class VfdLevelMeter : FrameworkElement
 
     private void DrawText(DrawingContext dc, string text, double x, double y, double size, Color color)
     {
-        var formatted = new FormattedText(
+        var formatted = CreateFormattedText(text, size, color);
+
+        if (GlowEnabled)
+        {
+            var glowText = CreateFormattedText(text, size, WithAlpha(color, 60));
+            foreach (var offset in new[] { new Point(-1, 0), new Point(1, 0), new Point(0, -1), new Point(0, 1), new Point(-1, -1), new Point(1, 1) })
+                dc.DrawText(glowText, new Point(x + offset.X, y + offset.Y));
+        }
+
+        dc.DrawText(formatted, new Point(x, y));
+    }
+
+    private FormattedText CreateFormattedText(string text, double size, Color color) =>
+        new(
             text,
             CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
@@ -279,21 +295,4 @@ public sealed class VfdLevelMeter : FrameworkElement
             size,
             new SolidColorBrush(color),
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
-
-        if (GlowEnabled)
-        {
-            var glowText = new FormattedText(
-                text,
-                CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
-                new Typeface("Consolas"),
-                size,
-                new SolidColorBrush(WithAlpha(color, 60)),
-                VisualTreeHelper.GetDpi(this).PixelsPerDip);
-            foreach (var offset in new[] { new Point(-1, 0), new Point(1, 0), new Point(0, -1), new Point(0, 1), new Point(-1, -1), new Point(1, 1) })
-                dc.DrawText(glowText, new Point(x + offset.X, y + offset.Y));
-        }
-
-        dc.DrawText(formatted, new Point(x, y));
-    }
 }

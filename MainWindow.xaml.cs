@@ -6,6 +6,8 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
+using System.Windows.Input;
+using System.Windows.Controls.Primitives;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 
@@ -80,12 +82,14 @@ public partial class MainWindow : Window
     private double VuDisplayDbOffset => VuNormalizeEnabled ? 6.0 : 0.0;
     private DateTime _vfdDecayStarted;
     private bool _vfdDecayActive;
-    private bool _meterOnlySizeApplied;
+    private bool _compactSizeApplied;
     private double _normalWindowWidth = 1180;
-    private double _normalWindowHeight = 780;
-    private double _normalMinWidth = 980;
-    private double _normalMinHeight = 640;
+    private double _normalWindowHeight = 720;
     private WindowState _normalWindowState = WindowState.Normal;
+    private bool _layoutInitialized;
+    private bool _lastLayoutCompact;
+    private double _normalMainDisplayHeight = 240;
+    private double _compactMainDisplayHeight = 210;
 
     public MainWindow()
     {
@@ -129,10 +133,9 @@ public partial class MainWindow : Window
         _vfdDecayTimer.Interval = TimeSpan.FromMilliseconds(33);
         _vfdDecayTimer.Tick += VfdDecayTimer_Tick;
         RefreshDevices();
-        _uiReady = true;
         ApplyDisplayMode();
-        ApplyMeterOnlyState();
-        Topmost = AlwaysOnTopCheck.IsChecked == true;
+        _uiReady = true;
+        ApplyWindowLayout();
         UpdateControlLabels();
         UpdateTransportLeds();
         UpdateGridOverlay();
@@ -635,10 +638,9 @@ public partial class MainWindow : Window
         }
 
         UpdateLevelMeter();
-        PeakText.Text = _peak > 0.00001 ? $"Peak: {20 * Math.Log10(_peak):0.0} dB" : "Peak: -inf dB";
-        DurationText.Text = _isPlayingBack
-            ? $"Playback: {(DateTime.Now - _playbackStarted):mm\\:ss}"
-            : $"{(_isRecording ? "Record" : "Live")}: {(DateTime.Now - _recordingStarted):mm\\:ss}";
+        VfdStatus.TimeText = _isPlayingBack
+            ? $"PLAY {(DateTime.Now - _playbackStarted):mm\\:ss}"
+            : $"{(_isRecording ? "REC" : "LIVE")} {(DateTime.Now - _recordingStarted):mm\\:ss}";
         _renderTimer.Interval = TimeSpan.FromSeconds(1.0 / Math.Max(1.0, FpsSlider.Value));
     }
 
@@ -716,6 +718,10 @@ public partial class MainWindow : Window
         LevelMeter.ShowUnlitSegments = ShowUnlitCheck.IsChecked == true;
         LevelMeter.GlowEnabled = GlowCheck.IsChecked == true;
         LevelMeter.TextureEnabled = TextureCheck.IsChecked == true;
+        VfdStatus.ColorTheme = LevelMeter.ColorTheme;
+        VfdStatus.ShowUnlitSegments = LevelMeter.ShowUnlitSegments;
+        VfdStatus.GlowEnabled = LevelMeter.GlowEnabled;
+        VfdStatus.DisplayStyle = StatusSegmentMenuItem.IsChecked ? 1 : 0;
     }
 
     private void DrawSpectrumAnalyzerFrame()
@@ -1402,10 +1408,16 @@ public partial class MainWindow : Window
         MaxFrequencyCombo.SelectedIndex = settings.MaxFrequencyIndex;
         MeterColorCombo.SelectedIndex = settings.MeterColorIndex;
         MeterStyleCombo.SelectedIndex = settings.MeterStyleIndex;
+        SetStatusDisplayStyle(settings.StatusDisplayStyleIndex);
         DisplayModeCombo.SelectedIndex = settings.DisplayModeIndex;
         AnalyzerModeCombo.SelectedIndex = settings.AnalyzerModeIndex;
-        AlwaysOnTopCheck.IsChecked = settings.AlwaysOnTop;
-        MeterOnlyCheck.IsChecked = settings.MeterOnly;
+        TransportMenuItem.IsChecked = settings.ShowTransportPanel;
+        SettingsMenuItem.IsChecked = settings.ShowSettingsPanel;
+        MainDisplayMenuItem.IsChecked = settings.ShowMainDisplay;
+        WaveformMenuItem.IsChecked = settings.ShowWaveform;
+        LevelMeterMenuItem.IsChecked = settings.ShowLevelMeter;
+        CompactMenuItem.IsChecked = settings.CompactMode;
+        AlwaysOnTopMenuItem.IsChecked = settings.AlwaysOnTop;
         GridCheck.IsChecked = settings.GridEnabled;
         ShowUnlitCheck.IsChecked = settings.ShowUnlitSegments;
         GlowCheck.IsChecked = settings.GlowEnabled;
@@ -1427,10 +1439,16 @@ public partial class MainWindow : Window
         MaxFrequencyIndex = MaxFrequencyCombo.SelectedIndex,
         MeterColorIndex = MeterColorCombo.SelectedIndex,
         MeterStyleIndex = MeterStyleCombo.SelectedIndex,
+        StatusDisplayStyleIndex = StatusSegmentMenuItem.IsChecked ? 1 : 0,
         DisplayModeIndex = DisplayModeCombo.SelectedIndex,
         AnalyzerModeIndex = AnalyzerModeCombo.SelectedIndex,
-        AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true,
-        MeterOnly = MeterOnlyCheck.IsChecked == true,
+        AlwaysOnTop = AlwaysOnTopMenuItem.IsChecked,
+        ShowTransportPanel = TransportMenuItem.IsChecked,
+        ShowSettingsPanel = SettingsMenuItem.IsChecked,
+        ShowMainDisplay = MainDisplayMenuItem.IsChecked,
+        ShowWaveform = WaveformMenuItem.IsChecked,
+        ShowLevelMeter = LevelMeterMenuItem.IsChecked,
+        CompactMode = CompactMenuItem.IsChecked,
         GridEnabled = GridCheck.IsChecked == true,
         ShowUnlitSegments = ShowUnlitCheck.IsChecked == true,
         GlowEnabled = GlowCheck.IsChecked == true,
@@ -1462,8 +1480,7 @@ public partial class MainWindow : Window
         _loadingSettings = false;
         ResetDisplayHistory();
         ApplyDisplayMode();
-        ApplyMeterOnlyState();
-        Topmost = AlwaysOnTopCheck.IsChecked == true;
+        ApplyWindowLayout();
         UpdateControlLabels();
         UpdateGridOverlay();
         if (save)
@@ -1599,73 +1616,306 @@ public partial class MainWindow : Window
         SpectrogramGridCanvas.Visibility = analyzer ? Visibility.Collapsed : Visibility.Visible;
         TimeAxisCanvas.Visibility = analyzer ? Visibility.Collapsed : Visibility.Visible;
         SpectrumAnalyzer.Visibility = analyzer ? Visibility.Visible : Visibility.Collapsed;
-        WaveformImage.Visibility = analyzer ? Visibility.Collapsed : Visibility.Visible;
-        WaveformGridCanvas.Visibility = analyzer ? Visibility.Collapsed : Visibility.Visible;
+        WaveformImage.Visibility = Visibility.Visible;
+        WaveformGridCanvas.Visibility = Visibility.Visible;
+        if (_uiReady)
+            ApplyWindowLayout();
     }
 
-    private void MeterOnlyCheck_Changed(object sender, RoutedEventArgs e)
+    private void LayoutMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (!_uiReady)
             return;
 
-        ApplyMeterOnlyState();
+        if (sender == ContextTransportMenuItem)
+            TransportMenuItem.IsChecked = ContextTransportMenuItem.IsChecked;
+        else if (sender == ContextSettingsMenuItem)
+            SettingsMenuItem.IsChecked = ContextSettingsMenuItem.IsChecked;
+        else if (sender == ContextMainDisplayMenuItem)
+            MainDisplayMenuItem.IsChecked = ContextMainDisplayMenuItem.IsChecked;
+        else if (sender == ContextWaveformMenuItem)
+            WaveformMenuItem.IsChecked = ContextWaveformMenuItem.IsChecked;
+        else if (sender == ContextLevelMeterMenuItem)
+            LevelMeterMenuItem.IsChecked = ContextLevelMeterMenuItem.IsChecked;
+        else if (sender == ContextCompactMenuItem)
+            CompactMenuItem.IsChecked = ContextCompactMenuItem.IsChecked;
+        else if (sender == ContextAlwaysOnTopMenuItem)
+            AlwaysOnTopMenuItem.IsChecked = ContextAlwaysOnTopMenuItem.IsChecked;
+
+        ApplyWindowLayout();
         SaveSettings();
     }
 
-    private void ApplyMeterOnlyState()
+    private void StatusDisplayStyleMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        bool meterOnly = MeterOnlyCheck.IsChecked == true;
-        TopPanel.Visibility = meterOnly ? Visibility.Collapsed : Visibility.Visible;
+        if (!_uiReady)
+            return;
+
+        SetStatusDisplayStyle(sender == StatusSegmentMenuItem || sender == ContextStatusSegmentMenuItem ? 1 : 0);
+        ApplyMeterVisualSettings();
+        SaveSettings();
+    }
+
+    private void SetStatusDisplayStyle(int style)
+    {
+        bool segmented = style == 1;
+        StatusDotMenuItem.IsChecked = !segmented;
+        StatusSegmentMenuItem.IsChecked = segmented;
+        ContextStatusDotMenuItem.IsChecked = !segmented;
+        ContextStatusSegmentMenuItem.IsChecked = segmented;
+        if (VfdStatus != null)
+            VfdStatus.DisplayStyle = segmented ? 1 : 0;
+    }
+
+    private void ShowAllPanelsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_uiReady)
+            return;
+
+        TransportMenuItem.IsChecked = true;
+        SettingsMenuItem.IsChecked = true;
+        MainDisplayMenuItem.IsChecked = true;
+        WaveformMenuItem.IsChecked = true;
+        LevelMeterMenuItem.IsChecked = true;
+        ApplyWindowLayout();
+        SaveSettings();
+    }
+
+    private void ResetLayoutMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_uiReady)
+            return;
+
+        TransportMenuItem.IsChecked = true;
+        SettingsMenuItem.IsChecked = true;
+        MainDisplayMenuItem.IsChecked = true;
+        WaveformMenuItem.IsChecked = true;
+        LevelMeterMenuItem.IsChecked = true;
+        CompactMenuItem.IsChecked = false;
+        AlwaysOnTopMenuItem.IsChecked = false;
+        ApplyWindowLayout();
+        SaveSettings();
+    }
+
+    private void ExitMenuItem_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void ApplyWindowLayout()
+    {
         if (MainContentGrid == null)
             return;
 
-        MainContentGrid.RowDefinitions[0].Height = meterOnly ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-        MainContentGrid.RowDefinitions[1].Height = meterOnly ? new GridLength(0) : new GridLength(24);
-        MainContentGrid.RowDefinitions[2].Height = meterOnly ? new GridLength(0) : new GridLength(112);
-        MainContentGrid.RowDefinitions[3].Height = new GridLength(92);
-        ApplyMeterOnlyWindowSize(meterOnly);
+        bool compact = CompactMenuItem.IsChecked;
+        bool compactChanged = _layoutInitialized && compact != _lastLayoutCompact;
+        double oldTopHeight = TopPanel.Visibility == Visibility.Visible ? TopPanel.ActualHeight : 0;
+        double oldMainHeight = MainDisplayPanel.Visibility == Visibility.Visible
+            ? MainContentGrid.RowDefinitions[0].ActualHeight
+            : 0;
+        double oldTimeAxisHeight = MainContentGrid.RowDefinitions[1].ActualHeight;
+        double oldWaveformHeight = MainContentGrid.RowDefinitions[2].ActualHeight;
+        double oldLevelMeterHeight = MainContentGrid.RowDefinitions[3].ActualHeight;
+        if (oldMainHeight > 0)
+        {
+            if (!_lastLayoutCompact)
+                _normalMainDisplayHeight = oldMainHeight;
+        }
+
+        bool showTransport = TransportMenuItem.IsChecked;
+        bool showSettings = SettingsMenuItem.IsChecked && !compact;
+        bool showMainDisplay = MainDisplayMenuItem.IsChecked;
+        bool showWaveform = WaveformMenuItem.IsChecked;
+        bool showLevelMeter = LevelMeterMenuItem.IsChecked;
+
+        TransportPrimaryPanel.Visibility = showTransport ? Visibility.Visible : Visibility.Collapsed;
+        TransportSecondaryPanel.Visibility = showTransport ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPrimaryPanel.Visibility = showSettings ? Visibility.Visible : Visibility.Collapsed;
+        SettingsSecondaryPanel.Visibility = showSettings ? Visibility.Visible : Visibility.Collapsed;
+        SettingsDisplayPanel.Visibility = showSettings ? Visibility.Visible : Visibility.Collapsed;
+        TopPanel.Visibility = showTransport || showSettings ? Visibility.Visible : Visibility.Collapsed;
+
+        MainDisplayPanel.Visibility = showMainDisplay ? Visibility.Visible : Visibility.Collapsed;
+        bool showTimeAxis = showMainDisplay && DisplayModeCombo.SelectedIndex != 1;
+        TimeAxisPanel.Visibility = showTimeAxis ? Visibility.Visible : Visibility.Collapsed;
+        WaveformPanel.Visibility = showWaveform ? Visibility.Visible : Visibility.Collapsed;
+        LevelMeterPanel.Visibility = showLevelMeter ? Visibility.Visible : Visibility.Collapsed;
+
+        MainContentGrid.RowDefinitions[0].Height = showMainDisplay
+            ? compact
+                ? new GridLength(_compactMainDisplayHeight)
+                : new GridLength(1, GridUnitType.Star)
+            : new GridLength(0);
+        MainContentGrid.RowDefinitions[1].Height = showTimeAxis
+            ? new GridLength(compact ? 18 : 24)
+            : new GridLength(0);
+        MainContentGrid.RowDefinitions[2].Height = showWaveform
+            ? new GridLength(compact ? 66 : 112)
+            : new GridLength(0);
+        MainContentGrid.RowDefinitions[3].Height = showLevelMeter
+            ? new GridLength(compact ? 78 : 90)
+            : new GridLength(0);
+
+        TopPanel.Padding = compact ? new Thickness(7, 5, 7, 5) : new Thickness(14, 12, 14, 12);
+        TransportSecondaryPanel.Margin = compact ? new Thickness(0, 4, 0, 0) : new Thickness(0, 12, 0, 0);
+        SettingsPrimaryPanel.Margin = compact ? new Thickness(0, 4, 0, 0) : new Thickness(0, 10, 0, 0);
+        SettingsSecondaryPanel.Margin = compact ? new Thickness(0, 4, 0, 0) : new Thickness(0, 10, 0, 0);
+        SettingsDisplayPanel.Margin = compact ? new Thickness(0, 4, 0, 0) : new Thickness(0, 10, 0, 0);
+        MainContentGrid.Margin = compact ? new Thickness(5) : new Thickness(14);
+        WaveformPanel.Margin = showWaveform ? new Thickness(0, compact ? 4 : 12, 0, 0) : new Thickness(0);
+        LevelMeterPanel.Margin = showLevelMeter ? new Thickness(0, compact ? 4 : 12, 0, 0) : new Thickness(0);
+        LevelMeterPanel.Padding = compact ? new Thickness(5) : new Thickness(8);
+        VfdStatusColumn.Width = new GridLength(compact ? 190 : 240);
+        LevelMeter.Height = compact ? 64 : 68;
+        VfdStatus.Height = compact ? 48 : 52;
+        VfdStatus.Margin = compact
+            ? new Thickness(7, 0, 3, 0)
+            : new Thickness(14, 0, 8, 0);
+        ApplyCompactControlSizing(compact);
+
+        SettingsMenuItem.IsEnabled = !compact;
+        ContextSettingsMenuItem.IsEnabled = !compact;
+        MinWidth = compact || !showSettings ? 560 : 980;
+        MinHeight = compact ? 180 : showMainDisplay ? 300 : 150;
+
+        TopPanel.Measure(new Size(Math.Max(1, ActualWidth), double.PositiveInfinity));
+        double newTopHeight = TopPanel.Visibility == Visibility.Visible ? TopPanel.DesiredSize.Height : 0;
+        double newMainHeight = showMainDisplay
+            ? compact
+                ? _compactMainDisplayHeight
+                : oldMainHeight > 0 ? oldMainHeight : _normalMainDisplayHeight
+            : 0;
+        double newTimeAxisHeight = showTimeAxis ? compact ? 18 : 24 : 0;
+        double newWaveformHeight = showWaveform ? compact ? 66 : 112 : 0;
+        double newLevelMeterHeight = showLevelMeter ? compact ? 78 : 90 : 0;
+        double compactWindowHeight =
+            newTopHeight +
+            newMainHeight +
+            newTimeAxisHeight +
+            newWaveformHeight +
+            newLevelMeterHeight +
+            MainContentGrid.Margin.Top +
+            MainContentGrid.Margin.Bottom;
+
+        if (_layoutInitialized && !compactChanged && WindowState == WindowState.Normal)
+        {
+            double heightDelta =
+                newTopHeight - oldTopHeight +
+                newMainHeight - oldMainHeight +
+                newTimeAxisHeight - oldTimeAxisHeight +
+                newWaveformHeight - oldWaveformHeight +
+                newLevelMeterHeight - oldLevelMeterHeight;
+            Height = Math.Max(MinHeight, Height + heightDelta);
+        }
+
+        SyncLayoutMenus();
+        Topmost = AlwaysOnTopMenuItem.IsChecked;
+        ApplyCompactChrome(compact);
+        ApplyCompactWindowSize(compact, compactWindowHeight);
+        _lastLayoutCompact = compact;
+        _layoutInitialized = true;
+        UpdateGridOverlay();
     }
 
-    private void ApplyMeterOnlyWindowSize(bool meterOnly)
+    private void ApplyCompactControlSizing(bool compact)
     {
-        if (meterOnly)
+        DeviceCombo.MinWidth = compact ? 180 : 270;
+        RecordGainSlider.Width = compact ? 92 : 130;
+        PlaybackSlider.Width = compact ? 190 : 360;
+        GainSlider.Width = compact ? 82 : 118;
+        RangeSlider.Width = compact ? 88 : 130;
+        FpsSlider.Width = compact ? 68 : 100;
+        TimeDivisionSlider.Width = compact ? 96 : 150;
+
+        DisplayModeCombo.Width = compact ? 108 : 132;
+        DisplayModeCombo.MinWidth = compact ? 108 : 132;
+        AnalyzerModeCombo.Width = compact ? 88 : 112;
+        AnalyzerModeCombo.MinWidth = compact ? 88 : 112;
+        MeterColorCombo.Width = compact ? 72 : 96;
+        MeterColorCombo.MinWidth = compact ? 72 : 96;
+        MeterStyleCombo.Width = compact ? 78 : 96;
+        MeterStyleCombo.MinWidth = compact ? 78 : 96;
+
+        foreach (var combo in new[] { DisplayModeCombo, AnalyzerModeCombo, MeterColorCombo, MeterStyleCombo })
+            combo.Margin = compact ? new Thickness(4, 0, 7, 0) : new Thickness(8, 0, 14, 0);
+
+        foreach (var checkBox in new[] { VuNormalizeCheck, ShowUnlitCheck, GlowCheck, TextureCheck })
+            checkBox.Margin = compact ? new Thickness(0, 0, 6, 0) : new Thickness(0, 0, 12, 0);
+
+        foreach (var button in new[] { StartButton, StopButton, PlayButton, SaveButton })
+            button.MinWidth = compact ? 68 : 90;
+
+        DefaultsButton.MinWidth = compact ? 72 : 90;
+        DefaultsButton.Content = compact ? "Defaults" : "Default Settings";
+        DefaultsButton.Margin = compact ? new Thickness(6, 0, 0, 0) : new Thickness(12, 0, 0, 0);
+        SettingsVisualOptionsPanel.Margin = compact ? new Thickness(0) : new Thickness(0);
+    }
+
+    private void SyncLayoutMenus()
+    {
+        ContextTransportMenuItem.IsChecked = TransportMenuItem.IsChecked;
+        ContextSettingsMenuItem.IsChecked = SettingsMenuItem.IsChecked;
+        ContextMainDisplayMenuItem.IsChecked = MainDisplayMenuItem.IsChecked;
+        ContextWaveformMenuItem.IsChecked = WaveformMenuItem.IsChecked;
+        ContextLevelMeterMenuItem.IsChecked = LevelMeterMenuItem.IsChecked;
+        ContextCompactMenuItem.IsChecked = CompactMenuItem.IsChecked;
+        ContextAlwaysOnTopMenuItem.IsChecked = AlwaysOnTopMenuItem.IsChecked;
+    }
+
+    private void ApplyCompactChrome(bool compact)
+    {
+        MainMenu.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        WindowStyle = compact ? WindowStyle.None : WindowStyle.SingleBorderWindow;
+        ResizeMode = compact ? ResizeMode.CanResizeWithGrip : ResizeMode.CanResize;
+    }
+
+    private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (CompactMenuItem.IsChecked != true || e.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        DependencyObject? source = e.OriginalSource as DependencyObject;
+        while (source != null)
         {
-            if (!_meterOnlySizeApplied)
+            if (source is ButtonBase or Selector or Slider or MenuBase or TextBoxBase or ScrollBar or Thumb)
+                return;
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        try
+        {
+            DragMove();
+            e.Handled = true;
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private void ApplyCompactWindowSize(bool compact, double compactWindowHeight)
+    {
+        if (compact)
+        {
+            if (!_compactSizeApplied)
             {
                 _normalWindowState = WindowState;
                 _normalWindowWidth = WindowState == WindowState.Normal ? Width : RestoreBounds.Width;
                 _normalWindowHeight = WindowState == WindowState.Normal ? Height : RestoreBounds.Height;
-                _normalMinWidth = MinWidth;
-                _normalMinHeight = MinHeight;
             }
 
             WindowState = WindowState.Normal;
-            MinWidth = 720;
-            MinHeight = 136;
-            Width = Math.Max(MinWidth, Math.Min(_normalWindowWidth, 980));
-            Height = MinHeight;
-            _meterOnlySizeApplied = true;
+            MinWidth = 560;
+            MinHeight = 180;
+            Width = Math.Max(MinWidth, Math.Min(_normalWindowWidth, 760));
+            Height = Math.Max(MinHeight, compactWindowHeight);
+            _compactSizeApplied = true;
             return;
         }
 
-        if (!_meterOnlySizeApplied)
+        if (!_compactSizeApplied)
             return;
 
-        MinWidth = _normalMinWidth;
-        MinHeight = _normalMinHeight;
         Width = Math.Max(MinWidth, _normalWindowWidth);
         Height = Math.Max(MinHeight, _normalWindowHeight);
         WindowState = _normalWindowState == WindowState.Minimized ? WindowState.Normal : _normalWindowState;
-        _meterOnlySizeApplied = false;
-    }
-
-    private void AlwaysOnTopCheck_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!_uiReady)
-            return;
-
-        Topmost = AlwaysOnTopCheck.IsChecked == true;
-        SaveSettings();
+        _compactSizeApplied = false;
     }
 
     protected override void OnClosed(EventArgs e)

@@ -5,8 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:SpectrumViewerRT"
         mc:Ignorable="d"
-        Title="Spectrum Viewer RT" Height="780" Width="1180" MinHeight="640" MinWidth="980"
-        Background="#111418">
+        Title="Spectrum Viewer RT" Height="720" Width="1180" MinHeight="600" MinWidth="980"
+        Background="#111418" PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
     <Window.Resources>
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="#E6EDF3"/>
@@ -235,7 +235,51 @@
         </Style>
     </Window.Resources>
 
-    <DockPanel LastChildFill="True">
+    <DockPanel x:Name="RootPanel" LastChildFill="True">
+        <DockPanel.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Show recording / playback" x:Name="ContextTransportMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show settings" x:Name="ContextSettingsMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show main display" x:Name="ContextMainDisplayMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show waveform" x:Name="ContextWaveformMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show level meter" x:Name="ContextLevelMeterMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <Separator/>
+                <MenuItem Header="Compact mode" x:Name="ContextCompactMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="LIVE TIME display">
+                    <MenuItem Header="Dot matrix" x:Name="ContextStatusDotMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>
+                    <MenuItem Header="16 segment" x:Name="ContextStatusSegmentMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>
+                </MenuItem>
+                <MenuItem Header="Always on top" x:Name="ContextAlwaysOnTopMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <Separator/>
+                <MenuItem Header="Show all panels" Click="ShowAllPanelsMenuItem_Click"/>
+                <MenuItem Header="Reset layout" Click="ResetLayoutMenuItem_Click"/>
+                <Separator/>
+                <MenuItem Header="Exit" Click="ExitMenuItem_Click"/>
+            </ContextMenu>
+        </DockPanel.ContextMenu>
+
+        <Menu x:Name="MainMenu" DockPanel.Dock="Top" Height="26" Background="#151A20" Foreground="#E6EDF3">
+            <MenuItem Header="_View">
+                <MenuItem Header="Recording / playback" x:Name="TransportMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Settings" x:Name="SettingsMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Main display" x:Name="MainDisplayMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Waveform" x:Name="WaveformMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Level meter" x:Name="LevelMeterMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <Separator/>
+                <MenuItem Header="Compact mode" x:Name="CompactMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="LIVE TIME display">
+                    <MenuItem Header="Dot matrix" x:Name="StatusDotMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>
+                    <MenuItem Header="16 segment" x:Name="StatusSegmentMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="Show all panels" Click="ShowAllPanelsMenuItem_Click"/>
+                <MenuItem Header="Reset layout" Click="ResetLayoutMenuItem_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Window">
+                <MenuItem Header="Always on top" x:Name="AlwaysOnTopMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+            </MenuItem>
+        </Menu>
+
         <Border x:Name="TopPanel" DockPanel.Dock="Top" Background="#1B2027" BorderBrush="#2D3540" BorderThickness="0,0,0,1" Padding="14,12">
             <Grid>
                 <Grid.RowDefinitions>
@@ -253,31 +297,40 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Text="Source" FontWeight="SemiBold"/>
-                <ComboBox x:Name="ModeCombo" Grid.Column="1" SelectionChanged="ModeCombo_SelectionChanged"/>
-                <TextBlock Grid.Column="2" Text="Device" FontWeight="SemiBold"/>
-                <ComboBox x:Name="DeviceCombo" Grid.Column="3" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"
-                          SelectionChanged="DeviceCombo_SelectionChanged"/>
-                <StackPanel Grid.Column="4" Orientation="Horizontal">
-                    <Button x:Name="StartButton" Click="StartButton_Click">
-                        <Grid Width="64" Height="22">
-                            <Ellipse x:Name="RecordLed" Width="7" Height="7" HorizontalAlignment="Left" VerticalAlignment="Top"
-                                     Fill="#361010" Stroke="#5A1B1B" StrokeThickness="1"/>
-                            <TextBlock Text="Record" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Grid>
-                    </Button>
-                    <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" IsEnabled="False"/>
-                    <Button x:Name="PlayButton" Click="PlayButton_Click" IsEnabled="False">
-                        <Grid Width="64" Height="22">
-                            <Ellipse x:Name="PlayLed" Width="7" Height="7" HorizontalAlignment="Left" VerticalAlignment="Top"
-                                     Fill="#0F2C18" Stroke="#1C4F2B" StrokeThickness="1"/>
-                            <TextBlock Text="Play" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Grid>
-                    </Button>
-                    <Button x:Name="SaveButton" Content="Save WAV" Click="SaveButton_Click" IsEnabled="False"/>
-                </StackPanel>
+                <Grid x:Name="TransportPrimaryPanel" Grid.ColumnSpan="5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Source" FontWeight="SemiBold"/>
+                    <ComboBox x:Name="ModeCombo" Grid.Column="1" SelectionChanged="ModeCombo_SelectionChanged"/>
+                    <TextBlock Grid.Column="2" Text="Device" FontWeight="SemiBold"/>
+                    <ComboBox x:Name="DeviceCombo" Grid.Column="3" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"
+                              SelectionChanged="DeviceCombo_SelectionChanged"/>
+                    <StackPanel Grid.Column="4" Orientation="Horizontal">
+                        <Button x:Name="StartButton" Click="StartButton_Click">
+                            <Grid Width="64" Height="22">
+                                <Ellipse x:Name="RecordLed" Width="7" Height="7" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                         Fill="#361010" Stroke="#5A1B1B" StrokeThickness="1"/>
+                                <TextBlock Text="Record" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="StopButton" Content="Stop" Click="StopButton_Click" IsEnabled="False"/>
+                        <Button x:Name="PlayButton" Click="PlayButton_Click" IsEnabled="False">
+                            <Grid Width="64" Height="22">
+                                <Ellipse x:Name="PlayLed" Width="7" Height="7" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                         Fill="#0F2C18" Stroke="#1C4F2B" StrokeThickness="1"/>
+                                <TextBlock Text="Play" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="SaveButton" Content="Save WAV" Click="SaveButton_Click" IsEnabled="False"/>
+                    </StackPanel>
+                </Grid>
 
-                <Grid Grid.Row="1" Grid.ColumnSpan="5" Margin="0,12,0,0">
+                <Grid x:Name="TransportSecondaryPanel" Grid.Row="1" Grid.ColumnSpan="5" Margin="0,12,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
@@ -286,7 +339,7 @@
                               Visibility="Collapsed"
                               Checked="MonitorCheck_Changed" Unchecked="MonitorCheck_Changed"
                               ToolTip="Starts live display without recording."/>
-                    <StackPanel Orientation="Horizontal">
+                    <StackPanel x:Name="SettingsVisualOptionsPanel" Orientation="Horizontal">
                         <TextBlock Text="Status" Foreground="#65717D" Margin="0,0,8,0"/>
                         <TextBlock x:Name="StatusText" Text="Ready" Foreground="#9FB0C1" MinWidth="260"/>
                     </StackPanel>
@@ -307,7 +360,7 @@
                     </StackPanel>
                 </Grid>
 
-                <StackPanel Grid.Row="2" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                <StackPanel x:Name="SettingsPrimaryPanel" Grid.Row="2" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
                     <TextBlock Text="Gain"/>
                     <Slider x:Name="GainSlider" Width="118" Minimum="0.2" Maximum="8" Value="2.4" TickFrequency="0.2" Margin="8,0,6,0"
                             ValueChanged="ControlValue_Changed"
@@ -330,7 +383,7 @@
                     <TextBlock x:Name="FpsValueText" Text="60 fps" MinWidth="48" Foreground="#9FB0C1" Margin="0,0,14,0"/>
                 </StackPanel>
 
-                <StackPanel Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                <StackPanel x:Name="SettingsSecondaryPanel" Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
                     <TextBlock Text="Max Hz"/>
                     <ComboBox x:Name="MaxFrequencyCombo" Width="100" MinWidth="100" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="MaxFrequencyCombo_MouseDoubleClick"/>
                     <CheckBox x:Name="GridCheck" Content="Grid" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
@@ -345,7 +398,7 @@
                     <TextBlock x:Name="VisibleTimeText" Text="37.5 s" Foreground="#9FB0C1" Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <DockPanel Grid.Row="4" Grid.ColumnSpan="5" Margin="0,10,0,0" LastChildFill="True">
+                <DockPanel x:Name="SettingsDisplayPanel" Grid.Row="4" Grid.ColumnSpan="5" Margin="0,10,0,0" LastChildFill="True">
                     <Button x:Name="DefaultsButton" Content="Default Settings"
                             DockPanel.Dock="Right"
                             Click="DefaultsButton_Click"
@@ -386,7 +439,7 @@
                 <RowDefinition Height="92"/>
             </Grid.RowDefinitions>
 
-            <Border BorderBrush="#2D3540" BorderThickness="1" Background="#07090C">
+            <Border x:Name="MainDisplayPanel" BorderBrush="#2D3540" BorderThickness="1" Background="#07090C">
                 <Grid>
                     <Image x:Name="SpectrogramImage" Stretch="Fill" SnapsToDevicePixels="True"/>
                     <Canvas x:Name="SpectrogramGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
@@ -394,11 +447,11 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1" Margin="0,0,0,0" Background="#10161D" BorderBrush="#2D3540" BorderThickness="1,0,1,1">
+            <Border x:Name="TimeAxisPanel" Grid.Row="1" Margin="0,0,0,0" Background="#10161D" BorderBrush="#2D3540" BorderThickness="1,0,1,1">
                 <Canvas x:Name="TimeAxisCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
             </Border>
 
-            <Border Grid.Row="2" Margin="0,12,0,0" BorderBrush="#2D3540" BorderThickness="1" Background="#07090C">
+            <Border x:Name="WaveformPanel" Grid.Row="2" Margin="0,12,0,0" BorderBrush="#2D3540" BorderThickness="1" Background="#07090C">
                 <Grid>
                     <Image x:Name="WaveformImage" Stretch="Fill" SnapsToDevicePixels="True"/>
                     <Canvas x:Name="WaveformGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
@@ -406,23 +459,14 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="3" Margin="0,12,0,0" Background="#1B2027" BorderBrush="#2D3540" BorderThickness="1" Padding="12">
+            <Border x:Name="LevelMeterPanel" Grid.Row="3" Margin="0,12,0,0" Background="#1B2027" BorderBrush="#2D3540" BorderThickness="1" Padding="12">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="160"/>
-                        <ColumnDefinition Width="160"/>
-                        <ColumnDefinition Width="160"/>
+                        <ColumnDefinition x:Name="LevelMeterColumn" Width="*"/>
+                        <ColumnDefinition x:Name="VfdStatusColumn" Width="190"/>
                     </Grid.ColumnDefinitions>
                     <local:VfdLevelMeter x:Name="LevelMeter" Height="68" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="PeakText" Grid.Column="1" Text="Peak: -inf dB" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="DurationText" Grid.Column="2" Text="Live: 00:00" HorizontalAlignment="Center"/>
-                    <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Center">
-                        <CheckBox x:Name="MeterOnlyCheck" Content="Meter only" Foreground="#E6EDF3" VerticalAlignment="Center" Margin="0,0,12,0"
-                                  Checked="MeterOnlyCheck_Changed" Unchecked="MeterOnlyCheck_Changed"/>
-                        <CheckBox x:Name="AlwaysOnTopCheck" Content="Top" Foreground="#E6EDF3" VerticalAlignment="Center"
-                                  Checked="AlwaysOnTopCheck_Changed" Unchecked="AlwaysOnTopCheck_Changed"/>
-                    </StackPanel>
+                    <local:VfdStatusDisplay x:Name="VfdStatus" Grid.Column="1" Height="44" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </Grid>
             </Border>
         </Grid>
