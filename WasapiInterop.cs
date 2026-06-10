@@ -14,6 +14,7 @@ internal static class WasapiInterop
 
     public static readonly Guid IAudioClientId = new("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2");
     public static readonly Guid IAudioCaptureClientId = new("C8ADBD64-E71E-48A0-A4DE-185C395CD317");
+    public static readonly Guid IAudioEndpointVolumeId = new("5CDF2C82-841E-4546-9722-0CF74078229A");
 
     public enum EDataFlow
     {
@@ -130,6 +131,49 @@ internal static class WasapiInterop
         int ReleaseBuffer(uint frames);
         [PreserveSig]
         int GetNextPacketSize(out uint frames);
+    }
+
+    [ComImport]
+    [Guid("5CDF2C82-841E-4546-9722-0CF74078229A")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IAudioEndpointVolume
+    {
+        [PreserveSig]
+        int RegisterControlChangeNotify(IntPtr notify);
+        [PreserveSig]
+        int UnregisterControlChangeNotify(IntPtr notify);
+        [PreserveSig]
+        int GetChannelCount(out uint channelCount);
+        [PreserveSig]
+        int SetMasterVolumeLevel(float levelDb, IntPtr eventContext);
+        [PreserveSig]
+        int SetMasterVolumeLevelScalar(float level, IntPtr eventContext);
+        [PreserveSig]
+        int GetMasterVolumeLevel(out float levelDb);
+        [PreserveSig]
+        int GetMasterVolumeLevelScalar(out float level);
+        [PreserveSig]
+        int SetChannelVolumeLevel(uint channel, float levelDb, IntPtr eventContext);
+        [PreserveSig]
+        int SetChannelVolumeLevelScalar(uint channel, float level, IntPtr eventContext);
+        [PreserveSig]
+        int GetChannelVolumeLevel(uint channel, out float levelDb);
+        [PreserveSig]
+        int GetChannelVolumeLevelScalar(uint channel, out float level);
+        [PreserveSig]
+        int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, IntPtr eventContext);
+        [PreserveSig]
+        int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+        [PreserveSig]
+        int GetVolumeStepInfo(out uint step, out uint stepCount);
+        [PreserveSig]
+        int VolumeStepUp(IntPtr eventContext);
+        [PreserveSig]
+        int VolumeStepDown(IntPtr eventContext);
+        [PreserveSig]
+        int QueryHardwareSupport(out uint hardwareSupportMask);
+        [PreserveSig]
+        int GetVolumeRange(out float minimumDb, out float maximumDb, out float incrementDb);
     }
 
     [DllImport("ole32.dll")]

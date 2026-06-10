@@ -43,6 +43,8 @@ public sealed class VfdLevelMeter : FrameworkElement
             new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
 
     private static readonly double[] DbMarks = { -60, -40, -30, -20, -10, -4, -2, 0, 2, 4, 6, 8, 10, 12, 14 };
+    private double _verticalRenderScale = 1.0;
+    private readonly DotMatrixVfdRasterizer _dotRasterizer = new();
 
     public double LeftLevel
     {
@@ -113,11 +115,22 @@ public sealed class VfdLevelMeter : FrameworkElement
         if (contentScale <= 0 || ActualWidth <= 0)
             return;
 
+        _verticalRenderScale = contentScale;
+        bool dotMatrix = MeterStyle is 2 or 3;
+        if (dotMatrix)
+            _dotRasterizer.Begin(ActualWidth, ActualHeight, VisualTreeHelper.GetDpi(this));
         dc.PushClip(new RectangleGeometry(bounds));
         dc.PushTransform(new ScaleTransform(1.0, contentScale));
         DrawMeterContent(dc, ActualWidth, designHeight);
         dc.Pop();
         dc.Pop();
+        if (dotMatrix)
+        {
+            var image = _dotRasterizer.Commit();
+            if (image != null)
+                dc.DrawImage(image, bounds);
+        }
+        _verticalRenderScale = 1.0;
         DrawTexture(dc, bounds);
     }
 
@@ -141,7 +154,7 @@ public sealed class VfdLevelMeter : FrameworkElement
     {
         DrawText(dc, label, 10, y, 9, ActiveColor());
 
-        if (MeterStyle == 1)
+        if (MeterStyle is 1 or 3)
         {
             DrawFineLineRow(dc, level, peakHold, x, y, width, height);
             return;
@@ -164,9 +177,12 @@ public sealed class VfdLevelMeter : FrameworkElement
         }
 
         int holdSegment = Math.Clamp((int)Math.Round(DbToPosition(holdDb) * (segments - 1)), 0, segments - 1);
-        double holdSegmentDb = -60 + holdSegment / (double)(segments - 1) * 74;
-        var holdRect = new Rect(x + holdSegment * (segmentWidth + gap), y, segmentWidth, height);
-        DrawSegment(dc, holdRect, SegmentColor(holdSegmentDb, true), true);
+        if (holdDb > -60.0)
+        {
+            double holdSegmentDb = -60 + holdSegment / (double)(segments - 1) * 74;
+            var holdRect = new Rect(x + holdSegment * (segmentWidth + gap), y, segmentWidth, height);
+            DrawSegment(dc, holdRect, SegmentColor(holdSegmentDb, true), true);
+        }
     }
 
     private void DrawFineLineRow(DrawingContext dc, double level, double peakHold, double x, double y, double width, double height)
@@ -195,7 +211,7 @@ public sealed class VfdLevelMeter : FrameworkElement
             int blockPixel = firstPixel + block * profile.BlockPitchPixels;
             double blockPosition = blockCount == 1 ? 0 : block / (double)(blockCount - 1);
             double blockDb = -60 + blockPosition * 74;
-            bool active = block < activeBlock || block == holdBlock;
+            bool active = block < activeBlock || holdDb > -60.0 && block == holdBlock;
             Color color = SegmentColor(blockDb, active);
 
             for (int line = 0; line < profile.LinesPerBlock; line++)
@@ -226,6 +242,12 @@ public sealed class VfdLevelMeter : FrameworkElement
         Color color,
         bool active)
     {
+        if (MeterStyle == 3)
+        {
+            DrawDotMatrixColumn(dc, x, y, height, pixelWidth, color, active);
+            return;
+        }
+
         if (active && GlowEnabled)
         {
             dc.DrawRectangle(
@@ -237,8 +259,29 @@ public sealed class VfdLevelMeter : FrameworkElement
         dc.DrawRectangle(new SolidColorBrush(color), null, new Rect(x, y, pixelWidth, height));
     }
 
+    private void DrawDotMatrixColumn(
+        DrawingContext dc,
+        double x,
+        double y,
+        double height,
+        double pixelWidth,
+        Color color,
+        bool active)
+    {
+        _dotRasterizer.DrawDots(
+            new Rect(x, y * _verticalRenderScale, pixelWidth, height * _verticalRenderScale),
+            color,
+            active && GlowEnabled);
+    }
+
     private void DrawSegment(DrawingContext dc, Rect rect, Color color, bool active)
     {
+        if (MeterStyle == 2)
+        {
+            DrawDotMatrixBlock(dc, rect, color, active);
+            return;
+        }
+
         if (active && GlowEnabled)
         {
             dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 42)), null, Inflate(rect, 2.4, 2.0), 2.2, 2.2);
@@ -246,6 +289,14 @@ public sealed class VfdLevelMeter : FrameworkElement
         }
 
         dc.DrawRoundedRectangle(new SolidColorBrush(color), null, rect, 1, 1);
+    }
+
+    private void DrawDotMatrixBlock(DrawingContext dc, Rect rect, Color color, bool active)
+    {
+        _dotRasterizer.DrawDots(
+            new Rect(rect.X, rect.Y * _verticalRenderScale, rect.Width, rect.Height * _verticalRenderScale),
+            color,
+            active && GlowEnabled);
     }
 
     private void DrawScale(DrawingContext dc, double x, double y, double width)

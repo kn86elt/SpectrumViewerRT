@@ -14,6 +14,18 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
     private double _lastLeft;
     private double _lastRight;
     private LevelMeterReading _lastLevel;
+    private volatile bool _compensateOutputVolume;
+
+    public WasapiLoopbackCapture(bool compensateOutputVolume = false)
+    {
+        _compensateOutputVolume = compensateOutputVolume;
+    }
+
+    public bool CompensateOutputVolume
+    {
+        get => _compensateOutputVolume;
+        set => _compensateOutputVolume = value;
+    }
 
     public event Action<short[]>? SamplesAvailable;
     public event Action<short[], short[]>? StereoSamplesAvailable;
@@ -50,6 +62,7 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         object? captureClientObject = null;
         object? enumeratorObject = null;
         object? deviceObject = null;
+        object? endpointVolumeObject = null;
         IntPtr formatPtr = IntPtr.Zero;
         bool comInitialized = false;
 
@@ -68,6 +81,13 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
             var audioClientId = WasapiInterop.IAudioClientId;
             ThrowIfFailed(device.Activate(ref audioClientId, WasapiInterop.ClsctxAll, IntPtr.Zero, out audioClientObject), "IMMDevice.Activate");
             var audioClient = (WasapiInterop.IAudioClient)audioClientObject;
+
+            WasapiInterop.IAudioEndpointVolume? endpointVolume = null;
+            var endpointVolumeId = WasapiInterop.IAudioEndpointVolumeId;
+            if (device.Activate(ref endpointVolumeId, WasapiInterop.ClsctxAll, IntPtr.Zero, out endpointVolumeObject) >= 0)
+                endpointVolume = (WasapiInterop.IAudioEndpointVolume)endpointVolumeObject;
+            else
+                endpointVolumeObject = null;
 
             ThrowIfFailed(audioClient.GetMixFormat(out formatPtr), "IAudioClient.GetMixFormat");
             var format = Marshal.PtrToStructure<WasapiInterop.WaveFormatEx>(formatPtr);
@@ -91,6 +111,8 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
             StatusAvailable?.Invoke("WASAPI loopback started");
             try
             {
+                double outputVolumeGain = 1.0;
+                long nextVolumeRead = 0;
                 while (_running)
                 {
                     ThrowIfFailed(captureClient.GetNextPacketSize(out var packetFrames), "IAudioCaptureClient.GetNextPacketSize");
@@ -102,10 +124,26 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
 
                     while (packetFrames > 0 && _running)
                     {
+                        long now = Environment.TickCount64;
+                        if (now >= nextVolumeRead)
+                        {
+                            outputVolumeGain = GetOutputVolumeGain(endpointVolume);
+                            nextVolumeRead = now + 100;
+                        }
+
                         ThrowIfFailed(captureClient.GetBuffer(out var data, out var frames, out var bufferFlags, out _, out _), "IAudioCaptureClient.GetBuffer");
                         try
                         {
-                            var samples = ConvertPacket(data, (int)frames, channels, blockAlign, bits, float32, sourceRate, bufferFlags.HasFlag(WasapiInterop.AudioClientBufferFlags.Silent));
+                            var samples = ConvertPacket(
+                                data,
+                                (int)frames,
+                                channels,
+                                blockAlign,
+                                bits,
+                                float32,
+                                sourceRate,
+                                bufferFlags.HasFlag(WasapiInterop.AudioClientBufferFlags.Silent),
+                                outputVolumeGain);
                             if (samples.Mono.Length > 0)
                             {
                                 SamplesAvailable?.Invoke(samples.Mono);
@@ -144,6 +182,8 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
                 Marshal.ReleaseComObject(captureClientObject);
             if (audioClientObject != null)
                 Marshal.ReleaseComObject(audioClientObject);
+            if (endpointVolumeObject != null)
+                Marshal.ReleaseComObject(endpointVolumeObject);
             if (deviceObject != null)
                 Marshal.ReleaseComObject(deviceObject);
             if (enumeratorObject != null)
@@ -153,7 +193,16 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         }
     }
 
-    private PacketSamples ConvertPacket(IntPtr data, int frames, int channels, int blockAlign, int bits, bool float32, int sourceRate, bool silent)
+    private PacketSamples ConvertPacket(
+        IntPtr data,
+        int frames,
+        int channels,
+        int blockAlign,
+        int bits,
+        bool float32,
+        int sourceRate,
+        bool silent,
+        double outputVolumeGain)
     {
         if (frames <= 0)
             return new PacketSamples(Array.Empty<short>(), Array.Empty<short>(), Array.Empty<short>());
@@ -178,7 +227,7 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
                 for (int channel = 0; channel < channels; channel++)
                 {
                     int offset = frameOffset + channel * (bits / 8);
-                    double value = ReadSample(raw, offset, bits, float32);
+                    double value = ReadSample(raw, offset, bits, float32) * outputVolumeGain;
                     sum += value;
 
                     if (channel == 0)
@@ -205,6 +254,19 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
             rightPeak = leftPeak;
         _lastLevel = new LevelMeterReading(leftPeak, rightPeak);
         return ResampleToOutput(mono, left, right, sourceRate);
+    }
+
+    private double GetOutputVolumeGain(WasapiInterop.IAudioEndpointVolume? endpointVolume)
+    {
+        if (!_compensateOutputVolume || endpointVolume == null)
+            return 1.0;
+
+        if (endpointVolume.GetMute(out bool muted) < 0 || muted)
+            return 1.0;
+        if (endpointVolume.GetMasterVolumeLevel(out float levelDb) < 0 || !float.IsFinite(levelDb))
+            return 1.0;
+
+        return Math.Clamp(Math.Pow(10.0, -levelDb / 20.0), 1.0, 1000.0);
     }
 
     private PacketSamples ResampleToOutput(double[] mono, double[] left, double[] right, int sourceRate)

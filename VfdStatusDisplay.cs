@@ -13,6 +13,10 @@ public sealed class VfdStatusDisplay : FrameworkElement
         DependencyProperty.Register(nameof(DisplayStyle), typeof(int), typeof(VfdStatusDisplay),
             new FrameworkPropertyMetadata(0, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty SecondaryTextProperty =
+        DependencyProperty.Register(nameof(SecondaryText), typeof(string), typeof(VfdStatusDisplay),
+            new FrameworkPropertyMetadata(string.Empty, FrameworkPropertyMetadataOptions.AffectsRender));
+
     public static readonly DependencyProperty ColorThemeProperty =
         DependencyProperty.Register(nameof(ColorTheme), typeof(int), typeof(VfdStatusDisplay),
             new FrameworkPropertyMetadata(0, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -34,6 +38,7 @@ public sealed class VfdStatusDisplay : FrameworkElement
         [' '] = new[] { "00000", "00000", "00000", "00000", "00000", "00000", "00000" },
         ['-'] = new[] { "00000", "00000", "00000", "11111", "00000", "00000", "00000" },
         ['.'] = new[] { "00000", "00000", "00000", "00000", "00000", "00110", "00110" },
+        ['/'] = new[] { "00001", "00010", "00010", "00100", "01000", "01000", "10000" },
         [':'] = new[] { "00000", "00110", "00110", "00000", "00110", "00110", "00000" },
         ['0'] = new[] { "01110", "10001", "10011", "10101", "11001", "10001", "01110" },
         ['1'] = new[] { "00100", "01100", "00100", "00100", "00100", "00100", "01110" },
@@ -54,10 +59,16 @@ public sealed class VfdStatusDisplay : FrameworkElement
         ['I'] = new[] { "01110", "00100", "00100", "00100", "00100", "00100", "01110" },
         ['K'] = new[] { "10001", "10010", "10100", "11000", "10100", "10010", "10001" },
         ['L'] = new[] { "10000", "10000", "10000", "10000", "10000", "10000", "11111" },
+        ['M'] = new[] { "10001", "11011", "10101", "10101", "10001", "10001", "10001" },
         ['N'] = new[] { "10001", "11001", "11001", "10101", "10011", "10011", "10001" },
+        ['O'] = new[] { "01110", "10001", "10001", "10001", "10001", "10001", "01110" },
         ['P'] = new[] { "11110", "10001", "10001", "11110", "10000", "10000", "10000" },
         ['R'] = new[] { "11110", "10001", "10001", "11110", "10100", "10010", "10001" },
+        ['S'] = new[] { "01111", "10000", "10000", "01110", "00001", "00001", "11110" },
+        ['T'] = new[] { "11111", "00100", "00100", "00100", "00100", "00100", "00100" },
+        ['U'] = new[] { "10001", "10001", "10001", "10001", "10001", "10001", "01110" },
         ['V'] = new[] { "10001", "10001", "10001", "10001", "10001", "01010", "00100" },
+        ['W'] = new[] { "10001", "10001", "10001", "10101", "10101", "10101", "01010" },
         ['Y'] = new[] { "10001", "10001", "01010", "00100", "00100", "00100", "00100" }
     };
 
@@ -101,6 +112,12 @@ public sealed class VfdStatusDisplay : FrameworkElement
         set => SetValue(DisplayStyleProperty, value);
     }
 
+    public string SecondaryText
+    {
+        get => (string)GetValue(SecondaryTextProperty);
+        set => SetValue(SecondaryTextProperty, value);
+    }
+
     public int ColorTheme
     {
         get => (int)GetValue(ColorThemeProperty);
@@ -138,12 +155,49 @@ public sealed class VfdStatusDisplay : FrameworkElement
             bounds, 3, 3);
 
         double horizontalPadding = Math.Min(15, ActualWidth * 0.07);
-        double verticalPadding = Math.Min(11, ActualHeight * 0.16);
-        double textHeight = Math.Max(1, ActualHeight - verticalPadding * 2);
-        if (DisplayStyle == 1)
-            DrawSegmentText(dc, TimeText, horizontalPadding, verticalPadding, textHeight);
+        bool hasSecondaryText = !string.IsNullOrWhiteSpace(SecondaryText);
+        if (hasSecondaryText)
+        {
+            DrawClockLayout(dc, bounds, horizontalPadding);
+        }
         else
-            DrawDotText(dc, TimeText, horizontalPadding, verticalPadding, textHeight);
+        {
+            double contentWidth = Math.Max(1, ActualWidth - horizontalPadding * 2);
+            double clockTimeWidth = Math.Max(1, contentWidth * 0.68 - 5);
+            double clockTimeHeight = Math.Max(1, ActualHeight - 16);
+            if (DisplayStyle == 1)
+            {
+                double scale = Math.Min(
+                    CalculateSegmentScale("88:88:88", clockTimeHeight, clockTimeWidth),
+                    CalculateSegmentScale(TimeText, clockTimeHeight, contentWidth));
+                double textWidth = SegmentTextWidth(TimeText, scale);
+                double textHeight = 19 * scale;
+                DrawSegmentText(
+                    dc,
+                    TimeText,
+                    (ActualWidth - textWidth) / 2.0,
+                    (ActualHeight - textHeight) / 2.0,
+                    clockTimeHeight,
+                    textWidth,
+                    scale);
+            }
+            else
+            {
+                double dotSize = Math.Min(
+                    CalculateDotSize("88:88:88", clockTimeHeight, clockTimeWidth),
+                    CalculateDotSize(TimeText, clockTimeHeight, contentWidth));
+                double textWidth = DotTextWidth(TimeText, dotSize);
+                double textHeight = DotGlyphHeight(dotSize);
+                DrawDotText(
+                    dc,
+                    TimeText,
+                    (ActualWidth - textWidth) / 2.0,
+                    (ActualHeight - textHeight) / 2.0,
+                    clockTimeHeight,
+                    textWidth,
+                    dotSize);
+            }
+        }
 
         if (TextureEnabled)
         {
@@ -153,16 +207,68 @@ public sealed class VfdStatusDisplay : FrameworkElement
         }
     }
 
-    private void DrawSegmentText(DrawingContext dc, string text, double x, double y, double height)
+    private void DrawClockLayout(DrawingContext dc, Rect bounds, double padding)
+    {
+        const double columnGap = 10;
+        double contentWidth = Math.Max(1, bounds.Width - padding * 2);
+        double timeWidth = Math.Max(1, contentWidth * 0.68 - columnGap / 2);
+        double infoWidth = Math.Max(1, contentWidth - timeWidth - columnGap);
+        double timeHeight = Math.Max(1, bounds.Height - 16);
+        double infoX = padding + timeWidth + columnGap;
+        string[] infoLines = SecondaryText.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        string dateText = infoLines.Length > 0 ? infoLines[0] : string.Empty;
+        string weekdayText = infoLines.Length > 1 ? infoLines[1] : string.Empty;
+
+        if (DisplayStyle == 1)
+        {
+            double timeScale = CalculateSegmentScale(TimeText, timeHeight, timeWidth);
+            double timeGlyphHeight = 19 * timeScale;
+            double infoGlyphHeight = Math.Max(1, (timeGlyphHeight - 2) / 2.0);
+            double infoScale = Math.Min(
+                CalculateSegmentScale(dateText, infoGlyphHeight + 3, infoWidth),
+                infoGlyphHeight / 19.0);
+            infoGlyphHeight = 19 * infoScale;
+            double infoBlockHeight = infoGlyphHeight * 2 + 2;
+            double timeTop = Math.Max(2, (bounds.Height - timeGlyphHeight) / 2.0);
+            double infoTop = timeTop + Math.Max(0, (timeGlyphHeight - infoBlockHeight) / 2.0);
+            DrawSegmentText(dc, TimeText, CenteredTextX(padding, timeWidth, SegmentTextWidth(TimeText, timeScale)), timeTop, timeHeight, timeWidth, timeScale);
+            DrawSegmentText(dc, dateText, CenteredTextX(infoX, infoWidth, SegmentTextWidth(dateText, infoScale)), infoTop, infoGlyphHeight + 3, infoWidth, infoScale);
+            DrawSegmentText(dc, weekdayText, CenteredTextX(infoX, infoWidth, SegmentTextWidth(weekdayText, infoScale)), infoTop + infoGlyphHeight + 2, infoGlyphHeight + 3, infoWidth, infoScale);
+        }
+        else
+        {
+            double timeDotSize = CalculateDotSize(TimeText, timeHeight, timeWidth);
+            double timeGlyphHeight = DotGlyphHeight(timeDotSize);
+            double targetInfoGlyphHeight = Math.Max(1, (timeGlyphHeight - 2) / 2.0);
+            double infoDotSize = Math.Min(
+                CalculateDotSize(dateText, targetInfoGlyphHeight + 2, infoWidth),
+                targetInfoGlyphHeight / 8.92);
+            double infoGlyphHeight = DotGlyphHeight(infoDotSize);
+            double infoBlockHeight = infoGlyphHeight * 2 + 2;
+            double timeTop = Math.Max(2, (bounds.Height - timeGlyphHeight) / 2.0);
+            double infoTop = timeTop + Math.Max(0, (timeGlyphHeight - infoBlockHeight) / 2.0);
+            DrawDotText(dc, TimeText, CenteredTextX(padding, timeWidth, DotTextWidth(TimeText, timeDotSize)), timeTop, timeHeight, timeWidth, timeDotSize);
+            DrawDotText(dc, dateText, CenteredTextX(infoX, infoWidth, DotTextWidth(dateText, infoDotSize)), infoTop, targetInfoGlyphHeight + 2, infoWidth, infoDotSize);
+            DrawDotText(dc, weekdayText, CenteredTextX(infoX, infoWidth, DotTextWidth(weekdayText, infoDotSize)), infoTop + infoGlyphHeight + 2, targetInfoGlyphHeight + 2, infoWidth, infoDotSize);
+        }
+    }
+
+    private void DrawSegmentText(
+        DrawingContext dc,
+        string text,
+        double x,
+        double y,
+        double height,
+        double width,
+        double maximumScale = double.PositiveInfinity)
     {
         text = (text ?? string.Empty).ToUpperInvariant();
-        double availableWidth = Math.Max(1, ActualWidth - x * 2 - 8);
-        double baseTextWidth = Math.Max(1, text.Sum(character => character == ':' ? 6.0 : 14.0) + 12.0);
-        double scale = Math.Min(height / 22.0, availableWidth / baseTextWidth);
+        double availableWidth = Math.Max(1, width);
+        double scale = Math.Min(CalculateSegmentScale(text, height, availableWidth), maximumScale);
         double charWidth = 11 * scale;
         double charGap = 3 * scale;
         double colonWidth = 3 * scale;
-        double maxX = ActualWidth - x;
+        double maxX = x + availableWidth;
         Color active = ActiveColor();
         Color inactive = InactiveColor();
 
@@ -202,17 +308,38 @@ public sealed class VfdStatusDisplay : FrameworkElement
         }
     }
 
-    private void DrawDotText(DrawingContext dc, string text, double x, double y, double height)
+    private static double CalculateSegmentScale(string text, double height, double width)
+    {
+        double baseTextWidth = Math.Max(1, (text ?? string.Empty).Sum(character => character == ':' ? 6.0 : 14.0) + 12.0);
+        return Math.Min(height / 22.0, Math.Max(1, width) / baseTextWidth);
+    }
+
+    private static double SegmentTextWidth(string text, double scale)
     {
         text = (text ?? string.Empty).ToUpperInvariant();
-        double availableWidth = Math.Max(1, ActualWidth - x * 2 - 8);
-        double widthUnits = Math.Max(1, text.Length * 7.46 - 1.18);
-        double dotSize = Math.Min(height / 10.2, availableWidth / (widthUnits + 4.0));
-        dotSize = Math.Max(0.15, dotSize);
+        if (text.Length == 0)
+            return 0;
+
+        double width = text.Sum(character => character == ':' ? 3.0 : 11.0) * scale;
+        return width + (text.Length - 1) * 3 * scale;
+    }
+
+    private void DrawDotText(
+        DrawingContext dc,
+        string text,
+        double x,
+        double y,
+        double height,
+        double width,
+        double maximumDotSize = double.PositiveInfinity)
+    {
+        text = (text ?? string.Empty).ToUpperInvariant();
+        double availableWidth = Math.Max(1, width);
+        double dotSize = Math.Min(CalculateDotSize(text, height, availableWidth), maximumDotSize);
         double dotGap = dotSize * 0.32;
         double charWidth = dotSize * 5 + dotGap * 4;
         double charGap = dotSize * 1.18;
-        double maxX = ActualWidth - x;
+        double maxX = x + availableWidth;
         Color active = ActiveColor();
         Color inactive = InactiveColor();
 
@@ -249,6 +376,29 @@ public sealed class VfdStatusDisplay : FrameworkElement
         }
     }
 
+    private static double CalculateDotSize(string text, double height, double width)
+    {
+        double widthUnits = Math.Max(1, (text ?? string.Empty).Length * 7.46 - 1.18);
+        return Math.Max(0.15, Math.Min(height / 10.2, Math.Max(1, width) / (widthUnits + 4.0)));
+    }
+
+    private static double DotGlyphHeight(double dotSize) => dotSize * 8.92;
+
+    private static double DotTextWidth(string text, double dotSize)
+    {
+        int length = (text ?? string.Empty).Length;
+        if (length == 0)
+            return 0;
+
+        double dotGap = dotSize * 0.32;
+        double charWidth = dotSize * 5 + dotGap * 4;
+        double charGap = dotSize * 1.18;
+        return length * charWidth + (length - 1) * charGap;
+    }
+
+    private static double CenteredTextX(double left, double width, double textWidth) =>
+        left + Math.Max(0, (width - textWidth) / 2.0);
+
     private void DrawColon(DrawingContext dc, double x, double y, double width, double scale, Color color)
     {
         double dotSize = Math.Max(0.2, Math.Min(width, 1.7 * scale));
@@ -284,14 +434,25 @@ public sealed class VfdStatusDisplay : FrameworkElement
         '9' => Mask(0, 1, 2, 3, 4, 5, 7, 8, 9),
         'A' => Mask(0, 1, 2, 3, 4, 5, 6, 7),
         'C' => Mask(0, 1, 2, 6, 8, 9),
+        'D' => Mask(0, 1, 3, 7, 8, 9, 14, 15),
         'E' => Mask(0, 1, 2, 4, 5, 6, 8, 9),
+        'F' => Mask(0, 1, 2, 4, 5, 6),
+        'H' => Mask(2, 3, 4, 5, 6, 7),
         'I' => Mask(0, 1, 8, 9, 14, 15),
         'L' => Mask(2, 6, 8, 9),
+        'M' => Mask(2, 3, 6, 7, 10, 11),
+        'N' => Mask(2, 3, 6, 7, 10, 13),
+        'O' => Mask(0, 1, 2, 3, 6, 7, 8, 9),
         'P' => Mask(0, 1, 2, 3, 4, 5, 6),
         'R' => Mask(0, 1, 2, 3, 4, 5, 6, 13),
+        'S' => Mask(0, 1, 2, 4, 5, 7, 8, 9),
+        'T' => Mask(0, 1, 14, 15),
+        'U' => Mask(2, 3, 6, 7, 8, 9),
         'V' => Mask(2, 6, 11, 12),
+        'W' => Mask(2, 3, 6, 7, 12, 13),
         'Y' => Mask(10, 11, 15),
         '-' => Mask(4, 5),
+        '/' => Mask(11, 12),
         _ => 0
     };
 

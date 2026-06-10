@@ -42,15 +42,23 @@ public partial class MainWindow : Window
     private readonly List<short> _latestRenderSamples = new();
     private const double TimeDivisions = 10.0;
     private double _scrollColumnAccumulator;
-    private readonly double[] _analyzerLevels = new double[48];
-    private readonly double[] _analyzerHolds = Enumerable.Repeat(-90.0, 48).ToArray();
-    private readonly DateTime[] _analyzerHoldUntil = new DateTime[48];
-    private readonly double[] _leftAnalyzerLevels = new double[48];
-    private readonly double[] _leftAnalyzerHolds = Enumerable.Repeat(-90.0, 48).ToArray();
-    private readonly DateTime[] _leftAnalyzerHoldUntil = new DateTime[48];
-    private readonly double[] _rightAnalyzerLevels = new double[48];
-    private readonly double[] _rightAnalyzerHolds = Enumerable.Repeat(-90.0, 48).ToArray();
-    private readonly DateTime[] _rightAnalyzerHoldUntil = new DateTime[48];
+    private double[] _analyzerLevels = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
+    private double[] _analyzerHolds = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
+    private DateTime[] _analyzerHoldUntil = new DateTime[Defaults.AnalyzerBandCount];
+    private double[] _leftAnalyzerLevels = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
+    private double[] _leftAnalyzerHolds = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
+    private DateTime[] _leftAnalyzerHoldUntil = new DateTime[Defaults.AnalyzerBandCount];
+    private double[] _rightAnalyzerLevels = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
+    private double[] _rightAnalyzerHolds = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
+    private DateTime[] _rightAnalyzerHoldUntil = new DateTime[Defaults.AnalyzerBandCount];
+    private int _monoAnalyzerBandCount = Defaults.AnalyzerBandCount;
+    private int _stereoAnalyzerBandCount = Defaults.AnalyzerBandCount;
+    private int _monoCustomAnalyzerBandCount = Defaults.AnalyzerBandCount;
+    private int _stereoCustomAnalyzerBandCount = Defaults.AnalyzerBandCount;
+    private double _monoAnalyzerMaxBandWidth = Defaults.MonoAnalyzerMaxBandWidth;
+    private double _stereoAnalyzerMaxBandWidth = Defaults.StereoAnalyzerMaxBandWidth;
+    private double _monoAnalyzerMaxBandGap = Defaults.MonoAnalyzerMaxBandGap;
+    private double _stereoAnalyzerMaxBandGap = Defaults.StereoAnalyzerMaxBandGap;
     private IAudioCaptureSource? _capture;
     private AudioPlayback? _monitor;
     private readonly MediaPlayer _playbackPlayer = new();
@@ -65,6 +73,11 @@ public partial class MainWindow : Window
     private LevelMeterReading _peakHoldLevel;
     private DateTime _leftPeakHoldUntil;
     private DateTime _rightPeakHoldUntil;
+    private DateTime _lastLevelMeterUpdate = DateTime.Now;
+    private int _lastDotMeterLeft = int.MinValue;
+    private int _lastDotMeterRight = int.MinValue;
+    private int _lastDotMeterLeftHold = int.MinValue;
+    private int _lastDotMeterRightHold = int.MinValue;
     private bool _isRecording;
     private bool _recordingStereo;
     private bool _recordedStereo;
@@ -72,6 +85,10 @@ public partial class MainWindow : Window
     private bool _changingMonitorCheck;
     private bool _refreshingDevices;
     private bool _updatingPlaybackSlider;
+    private bool _showLiveClock;
+    private Point _vfdStatusPointerDown;
+    private bool _vfdStatusPointerPressed;
+    private bool _vfdStatusDragging;
     private bool _loadingSettings;
     private bool _resettingDisplay;
     private bool _uiReady;
@@ -107,6 +124,8 @@ public partial class MainWindow : Window
         public static PanelVisibilityState CompactDefault => new(true, false, true, true, true);
     }
 
+    private static double[] CreateAnalyzerValues(int count) => Enumerable.Repeat(-90.0, count).ToArray();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -127,6 +146,8 @@ public partial class MainWindow : Window
         MeterColorCombo.Items.Add("Blue");
         MeterStyleCombo.Items.Add("Block");
         MeterStyleCombo.Items.Add("Fine Lines");
+        MeterStyleCombo.Items.Add("Dot Matrix Block");
+        MeterStyleCombo.Items.Add("Dot Matrix Fine Lines");
         DisplayModeCombo.Items.Add("Spectrogram");
         DisplayModeCombo.Items.Add("Spectrum Analyzer (Mono)");
         DisplayModeCombo.Items.Add("Spectrum Analyzer (Stereo)");
@@ -178,6 +199,15 @@ public partial class MainWindow : Window
             return;
 
         RestartCaptureForSelectedSource();
+    }
+
+    private void CompensateSystemVolumeCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_capture is WasapiLoopbackCapture loopback)
+            loopback.CompensateOutputVolume = CompensateSystemVolumeCheck.IsChecked == true;
+
+        if (_uiReady && !_loadingSettings)
+            SaveSettings();
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
@@ -252,7 +282,7 @@ public partial class MainWindow : Window
     private IAudioCaptureSource CreateCaptureSource()
     {
         if (SelectedMode == CaptureMode.SystemOutput)
-            return new WasapiLoopbackCapture();
+            return new WasapiLoopbackCapture(CompensateSystemVolumeCheck.IsChecked == true);
 
         if (DeviceCombo.SelectedItem is not AudioDevice device)
             throw new InvalidOperationException("Input device is not selected.");
@@ -653,10 +683,78 @@ public partial class MainWindow : Window
         }
 
         UpdateLevelMeter();
-        VfdStatus.TimeText = _isPlayingBack
-            ? $"PLAY {(DateTime.Now - _playbackStarted):mm\\:ss}"
-            : $"{(_isRecording ? "REC" : "LIVE")} {(DateTime.Now - _recordingStarted):mm\\:ss}";
+        UpdateVfdStatusTime();
         _renderTimer.Interval = TimeSpan.FromSeconds(1.0 / Math.Max(1.0, FpsSlider.Value));
+    }
+
+    private void UpdateVfdStatusTime()
+    {
+        DateTime now = DateTime.Now;
+        bool liveClock = _showLiveClock && _capture != null && !_isRecording && !_isPlayingBack;
+        if (liveClock)
+        {
+            VfdStatus.TimeText = now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            VfdStatus.SecondaryText = now.ToString("MM/dd ddd", CultureInfo.InvariantCulture).ToUpperInvariant();
+            return;
+        }
+
+        VfdStatus.SecondaryText = string.Empty;
+        VfdStatus.TimeText = _isPlayingBack
+            ? $"PLAY {(now - _playbackStarted):mm\\:ss}"
+            : $"{(_isRecording ? "REC" : "LIVE")} {(now - _recordingStarted):mm\\:ss}";
+    }
+
+    private void VfdStatus_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _vfdStatusPointerDown = e.GetPosition(this);
+        _vfdStatusPointerPressed = true;
+        _vfdStatusDragging = false;
+        VfdStatus.CaptureMouse();
+    }
+
+    private void VfdStatus_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_vfdStatusPointerPressed ||
+            CompactMenuItem.IsChecked != true ||
+            e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        Point current = e.GetPosition(this);
+        if (Math.Abs(current.X - _vfdStatusPointerDown.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(current.Y - _vfdStatusPointerDown.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        _vfdStatusDragging = true;
+        _vfdStatusPointerPressed = false;
+        VfdStatus.ReleaseMouseCapture();
+        try
+        {
+            DragMove();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private void VfdStatus_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        VfdStatus.ReleaseMouseCapture();
+        bool wasDragging = _vfdStatusDragging;
+        _vfdStatusPointerPressed = false;
+        _vfdStatusDragging = false;
+        if (wasDragging)
+            return;
+
+        if (_capture == null || _isRecording || _isPlayingBack)
+            return;
+
+        _showLiveClock = !_showLiveClock;
+        UpdateVfdStatusTime();
+        e.Handled = true;
     }
 
     private void AddRecordedSamples(short[] samples)
@@ -716,18 +814,35 @@ public partial class MainWindow : Window
     private void UpdateLevelMeter()
     {
         var now = DateTime.Now;
-        const double decay = 0.965;
+        double elapsedSeconds = Math.Clamp((now - _lastLevelMeterUpdate).TotalSeconds, 0, 0.25);
+        _lastLevelMeterUpdate = now;
 
         if (now > _leftPeakHoldUntil)
-            _peakHoldLevel = _peakHoldLevel with { Left = Math.Max(_currentLevel.Left, _peakHoldLevel.Left * decay) };
+            _peakHoldLevel = _peakHoldLevel with
+            {
+                Left = DecayPeakLevel(_peakHoldLevel.Left, _currentLevel.Left, elapsedSeconds)
+            };
         if (now > _rightPeakHoldUntil)
-            _peakHoldLevel = _peakHoldLevel with { Right = Math.Max(_currentLevel.Right, _peakHoldLevel.Right * decay) };
+            _peakHoldLevel = _peakHoldLevel with
+            {
+                Right = DecayPeakLevel(_peakHoldLevel.Right, _currentLevel.Right, elapsedSeconds)
+            };
 
         double displayGain = VuDisplayGain;
-        LevelMeter.LeftLevel = Math.Clamp(_currentLevel.Left * displayGain, 0, 2);
-        LevelMeter.RightLevel = Math.Clamp(_currentLevel.Right * displayGain, 0, 2);
-        LevelMeter.LeftPeakHold = Math.Clamp(_peakHoldLevel.Left * displayGain, 0, 2);
-        LevelMeter.RightPeakHold = Math.Clamp(_peakHoldLevel.Right * displayGain, 0, 2);
+        double leftLevel = Math.Clamp(_currentLevel.Left * displayGain, 0, 2);
+        double rightLevel = Math.Clamp(_currentLevel.Right * displayGain, 0, 2);
+        double leftHold = Math.Clamp(_peakHoldLevel.Left * displayGain, 0, 2);
+        double rightHold = Math.Clamp(_peakHoldLevel.Right * displayGain, 0, 2);
+        if (MeterStyleCombo.SelectedIndex is 2 or 3)
+            UpdateQuantizedDotMeter(leftLevel, rightLevel, leftHold, rightHold);
+        else
+        {
+            _lastDotMeterLeft = _lastDotMeterRight = _lastDotMeterLeftHold = _lastDotMeterRightHold = int.MinValue;
+            LevelMeter.LeftLevel = leftLevel;
+            LevelMeter.RightLevel = rightLevel;
+            LevelMeter.LeftPeakHold = leftHold;
+            LevelMeter.RightPeakHold = rightHold;
+        }
         LevelMeter.ColorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
         LevelMeter.MeterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
         LevelMeter.ShowUnlitSegments = ShowUnlitCheck.IsChecked == true;
@@ -738,6 +853,63 @@ public partial class MainWindow : Window
         VfdStatus.GlowEnabled = LevelMeter.GlowEnabled;
         VfdStatus.TextureEnabled = LevelMeter.TextureEnabled;
         VfdStatus.DisplayStyle = StatusSegmentMenuItem.IsChecked ? 1 : 0;
+    }
+
+    private void UpdateQuantizedDotMeter(double left, double right, double leftHold, double rightHold)
+    {
+        int steps = Math.Max(16, (int)Math.Round(Math.Max(1, LevelMeter.ActualWidth - 42) / 12.0));
+        int leftStep = QuantizeMeterLevel(left, steps);
+        int rightStep = QuantizeMeterLevel(right, steps);
+        int leftHoldStep = QuantizeMeterLevel(leftHold, steps);
+        int rightHoldStep = QuantizeMeterLevel(rightHold, steps);
+
+        if (leftStep != _lastDotMeterLeft)
+        {
+            _lastDotMeterLeft = leftStep;
+            LevelMeter.LeftLevel = MeterStepToLevel(leftStep, steps);
+        }
+        if (rightStep != _lastDotMeterRight)
+        {
+            _lastDotMeterRight = rightStep;
+            LevelMeter.RightLevel = MeterStepToLevel(rightStep, steps);
+        }
+        if (leftHoldStep != _lastDotMeterLeftHold)
+        {
+            _lastDotMeterLeftHold = leftHoldStep;
+            LevelMeter.LeftPeakHold = MeterStepToLevel(leftHoldStep, steps);
+        }
+        if (rightHoldStep != _lastDotMeterRightHold)
+        {
+            _lastDotMeterRightHold = rightHoldStep;
+            LevelMeter.RightPeakHold = MeterStepToLevel(rightHoldStep, steps);
+        }
+    }
+
+    private static int QuantizeMeterLevel(double level, int steps)
+    {
+        if (level <= 0)
+            return 0;
+        double db = Math.Clamp(20.0 * Math.Log10(level), -60, 14);
+        return Math.Clamp((int)Math.Round((db + 60.0) / 74.0 * steps), 0, steps);
+    }
+
+    private static double MeterStepToLevel(int step, int steps)
+    {
+        if (step <= 0)
+            return 0;
+        double db = -60.0 + step / (double)steps * 74.0;
+        return Math.Pow(10.0, db / 20.0);
+    }
+
+    private static double DecayPeakLevel(double peak, double current, double elapsedSeconds)
+    {
+        if (peak <= 0 && current <= 0)
+            return 0;
+
+        double peakDb = peak <= 0 ? -90.0 : 20.0 * Math.Log10(peak);
+        double currentDb = current <= 0 ? -90.0 : 20.0 * Math.Log10(current);
+        double decayedDb = Math.Max(currentDb, peakDb - 55.0 * elapsedSeconds);
+        return decayedDb <= -60.0 ? 0.0 : Math.Pow(10.0, decayedDb / 20.0);
     }
 
     private void DrawSpectrumAnalyzerFrame()
@@ -773,24 +945,41 @@ public partial class MainWindow : Window
         const double analyzerMaxFrequency = 20000.0;
         for (int band = 0; band < levels.Length; band++)
         {
-            double startFrequency = 20.0 * Math.Pow(analyzerMaxFrequency / 20.0, band / (double)levels.Length);
+            double startPosition = band / (double)levels.Length;
+            if (levels.Length <= 10 && band >= levels.Length - 2)
+            {
+                double overlapBands = band == levels.Length - 1 ? 0.75 : 0.45;
+                startPosition = Math.Max(0, startPosition - overlapBands / levels.Length);
+            }
+            double startFrequency = 20.0 * Math.Pow(analyzerMaxFrequency / 20.0, startPosition);
             double endFrequency = 20.0 * Math.Pow(analyzerMaxFrequency / 20.0, (band + 1) / (double)levels.Length);
             int startBin = Math.Clamp((int)(startFrequency / DisplaySampleRate * FftSize), 1, FftSize / 2 - 2);
             int endBin = Math.Clamp((int)(endFrequency / DisplaySampleRate * FftSize), startBin + 1, FftSize / 2 - 1);
             double sum = 0;
+            double peakMagnitude = 0;
             for (int bin = startBin; bin <= endBin; bin++)
-                sum += Magnitude(real, imaginary, bin);
-            double magnitude = sum / Math.Max(1, endBin - startBin + 1) / (FftSize * 0.5);
+            {
+                double binMagnitude = Magnitude(real, imaginary, bin);
+                sum += binMagnitude;
+                peakMagnitude = Math.Max(peakMagnitude, binMagnitude);
+            }
+            double averageMagnitude = sum / Math.Max(1, endBin - startBin + 1);
+            double magnitude = levels.Length <= 10 && band >= levels.Length - 2
+                ? averageMagnitude * 0.4 + peakMagnitude * 0.6
+                : averageMagnitude;
+            magnitude /= FftSize * 0.5;
             double db = Math.Clamp(20.0 * Math.Log10(magnitude + 0.0000000001) + VuDisplayDbOffset, -90, 14);
             levels[band] = Math.Max(db, levels[band] - 2.0);
-            if (db >= holds[band])
+            if (db > -60.0 && db >= holds[band] + 0.05)
             {
                 holds[band] = db;
                 holdUntil[band] = now.AddMilliseconds(900);
             }
             else if (now > holdUntil[band])
             {
-                holds[band] = Math.Max(levels[band], holds[band] - 1.2);
+                holds[band] = Math.Max(db, holds[band] - AnalyzerPeakDecayStep);
+                if (holds[band] <= -60.0)
+                    holds[band] = -90.0;
             }
         }
     }
@@ -805,7 +994,9 @@ public partial class MainWindow : Window
             UpdateSpectrumAnalyzerDisplay();
     }
 
-    private static bool DecayAnalyzer(double[] levels, double[] holds, DateTime[] holdUntil, DateTime now)
+    private double AnalyzerPeakDecayStep => 55.0 / Math.Max(12.0, FpsSlider.Value);
+
+    private bool DecayAnalyzer(double[] levels, double[] holds, DateTime[] holdUntil, DateTime now)
     {
         bool changed = false;
         for (int band = 0; band < holds.Length; band++)
@@ -815,7 +1006,9 @@ public partial class MainWindow : Window
                 continue;
 
             double previous = holds[band];
-            holds[band] = Math.Max(levels[band], holds[band] - 1.2);
+            holds[band] = Math.Max(levels[band], holds[band] - AnalyzerPeakDecayStep);
+            if (holds[band] <= -60.0)
+                holds[band] = -90.0;
             changed |= Math.Abs(previous - holds[band]) > 0.001;
         }
 
@@ -1003,10 +1196,14 @@ public partial class MainWindow : Window
             DeviceCombo.ItemsSource = new[] { new AudioDevice(-1, "Default Windows output") };
             DeviceCombo.SelectedIndex = 0;
             DeviceCombo.IsEnabled = false;
+            CompensateSystemVolumeCheck.Visibility = Visibility.Visible;
+            CompensateSystemVolumeCheck.IsEnabled = true;
             SetStatus("System output mode uses WASAPI loopback");
             return;
         }
 
+        CompensateSystemVolumeCheck.Visibility = Visibility.Collapsed;
+        CompensateSystemVolumeCheck.IsEnabled = false;
         int? previousDeviceId = DeviceCombo.SelectedItem is AudioDevice previous ? previous.Id : null;
         var devices = AudioCapture.GetInputDevices();
         DeviceCombo.ItemsSource = devices;
@@ -1328,6 +1525,7 @@ public partial class MainWindow : Window
 
         ModeCombo.IsEnabled = enabled;
         DeviceCombo.IsEnabled = enabled && SelectedMode == CaptureMode.Microphone;
+        CompensateSystemVolumeCheck.IsEnabled = enabled && SelectedMode == CaptureMode.SystemOutput;
     }
 
     private void SetStatus(string message)
@@ -1432,6 +1630,15 @@ public partial class MainWindow : Window
         DisplayModeCombo.SelectedIndex = settings.DisplayModeIndex == 0
             ? 0
             : settings.AnalyzerModeIndex == 1 || settings.DisplayModeIndex == 2 ? 2 : 1;
+        _monoAnalyzerBandCount = settings.MonoAnalyzerBandCount;
+        _stereoAnalyzerBandCount = settings.StereoAnalyzerBandCount;
+        _monoCustomAnalyzerBandCount = settings.MonoCustomAnalyzerBandCount;
+        _stereoCustomAnalyzerBandCount = settings.StereoCustomAnalyzerBandCount;
+        _monoAnalyzerMaxBandWidth = settings.MonoAnalyzerMaxBandWidth;
+        _stereoAnalyzerMaxBandWidth = settings.StereoAnalyzerMaxBandWidth;
+        _monoAnalyzerMaxBandGap = settings.MonoAnalyzerMaxBandGap;
+        _stereoAnalyzerMaxBandGap = settings.StereoAnalyzerMaxBandGap;
+        ResizeAnalyzerBuffers();
         _normalPanelState = new PanelVisibilityState(
             settings.ShowTransportPanel,
             settings.ShowSettingsPanel,
@@ -1452,6 +1659,7 @@ public partial class MainWindow : Window
         GlowCheck.IsChecked = settings.GlowEnabled;
         TextureCheck.IsChecked = settings.TextureEnabled;
         VuNormalizeCheck.IsChecked = settings.VuNormalizeEnabled;
+        CompensateSystemVolumeCheck.IsChecked = settings.CompensateSystemOutputVolume;
         LevelMeter.ColorTheme = settings.MeterColorIndex;
         LevelMeter.MeterStyle = settings.MeterStyleIndex;
         ApplyMeterVisualSettings();
@@ -1474,6 +1682,14 @@ public partial class MainWindow : Window
         StatusDisplayStyleIndex = StatusSegmentMenuItem.IsChecked ? 1 : 0,
         DisplayModeIndex = DisplayModeCombo.SelectedIndex,
         AnalyzerModeIndex = DisplayModeCombo.SelectedIndex == 2 ? 1 : 0,
+        MonoAnalyzerBandCount = _monoAnalyzerBandCount,
+        StereoAnalyzerBandCount = _stereoAnalyzerBandCount,
+        MonoCustomAnalyzerBandCount = _monoCustomAnalyzerBandCount,
+        StereoCustomAnalyzerBandCount = _stereoCustomAnalyzerBandCount,
+        MonoAnalyzerMaxBandWidth = _monoAnalyzerMaxBandWidth,
+        StereoAnalyzerMaxBandWidth = _stereoAnalyzerMaxBandWidth,
+        MonoAnalyzerMaxBandGap = _monoAnalyzerMaxBandGap,
+        StereoAnalyzerMaxBandGap = _stereoAnalyzerMaxBandGap,
         AlwaysOnTop = AlwaysOnTopMenuItem.IsChecked,
         ShowTransportPanel = _normalPanelState.Transport,
         ShowSettingsPanel = _normalPanelState.Settings,
@@ -1490,7 +1706,8 @@ public partial class MainWindow : Window
         ShowUnlitSegments = ShowUnlitCheck.IsChecked == true,
         GlowEnabled = GlowCheck.IsChecked == true,
         TextureEnabled = TextureCheck.IsChecked == true,
-        VuNormalizeEnabled = VuNormalizeCheck.IsChecked == true
+        VuNormalizeEnabled = VuNormalizeCheck.IsChecked == true,
+        CompensateSystemOutputVolume = CompensateSystemVolumeCheck.IsChecked == true
         };
     }
 
@@ -1649,6 +1866,7 @@ public partial class MainWindow : Window
         LevelMeter.GlowEnabled = GlowCheck.IsChecked == true;
         LevelMeter.TextureEnabled = TextureCheck.IsChecked == true;
         UpdateLevelMeter();
+        ApplyAnalyzerLayoutSettings();
         SpectrumAnalyzer.Update(
             _analyzerLevels,
             _analyzerHolds,
@@ -1661,6 +1879,7 @@ public partial class MainWindow : Window
 
     private void UpdateSpectrumAnalyzerDisplay()
     {
+        ApplyAnalyzerLayoutSettings();
         if (DisplayModeCombo.SelectedIndex == 2)
         {
             SpectrumAnalyzer.UpdateStereo(
@@ -1686,19 +1905,48 @@ public partial class MainWindow : Window
             TextureCheck.IsChecked == true);
     }
 
+    private void ApplyAnalyzerLayoutSettings()
+    {
+        bool stereo = DisplayModeCombo.SelectedIndex == 2;
+        SpectrumAnalyzer.MaximumBandWidth = stereo
+            ? _stereoAnalyzerMaxBandWidth
+            : _monoAnalyzerMaxBandWidth;
+        SpectrumAnalyzer.MaximumBandGap = stereo
+            ? _stereoAnalyzerMaxBandGap
+            : _monoAnalyzerMaxBandGap;
+    }
+
     private void DisplayModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_uiReady)
             return;
 
         ApplyDisplayMode();
+        ResizeAnalyzerBuffers();
         ResetDisplayHistory();
         SaveSettings();
+    }
+
+    private void DisplayModeContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        int index = sender == ContextDisplayAnalyzerMonoMenuItem
+            ? 1
+            : sender == ContextDisplayAnalyzerStereoMenuItem ? 2 : 0;
+
+        if (DisplayModeCombo.SelectedIndex == index)
+        {
+            SyncDisplayModeContextMenu();
+            return;
+        }
+
+        DisplayModeCombo.SelectedIndex = index;
     }
 
     private void ApplyDisplayMode()
     {
         bool analyzer = DisplayModeCombo.SelectedIndex > 0;
+        SyncDisplayModeContextMenu();
+        UpdateAnalyzerBandsButton();
         SettingsPrimaryPanel.IsEnabled = !analyzer;
         SettingsSecondaryPanel.IsEnabled = !analyzer;
         SettingsPrimaryPanel.Opacity = analyzer ? 0.42 : 1.0;
@@ -1711,6 +1959,249 @@ public partial class MainWindow : Window
         WaveformGridCanvas.Visibility = Visibility.Visible;
         if (_uiReady)
             ApplyWindowLayout();
+    }
+
+    private int ActiveAnalyzerBandCount =>
+        DisplayModeCombo.SelectedIndex == 2 ? _stereoAnalyzerBandCount : _monoAnalyzerBandCount;
+
+    private void AnalyzerBandsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AnalyzerBandsButton.ContextMenu == null)
+            return;
+
+        SyncAnalyzerBandMenuChecks();
+        AnalyzerBandsButton.ContextMenu.PlacementTarget = AnalyzerBandsButton;
+        AnalyzerBandsButton.ContextMenu.Placement = PlacementMode.Bottom;
+        AnalyzerBandsButton.ContextMenu.IsOpen = true;
+    }
+
+    private void AnalyzerBandPresetMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string value } ||
+            !int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int count))
+        {
+            return;
+        }
+
+        SetActiveAnalyzerBandCount(count);
+    }
+
+    private void AnalyzerBandCustomMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveAnalyzerBandCount(
+            DisplayModeCombo.SelectedIndex == 2
+                ? _stereoCustomAnalyzerBandCount
+                : _monoCustomAnalyzerBandCount);
+    }
+
+    private void AnalyzerBandDetailsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Window
+        {
+            Title = "Analyzer Band Settings",
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ResizeMode = ResizeMode.NoResize,
+            Background = new SolidColorBrush(Color.FromRgb(17, 20, 24)),
+            ShowInTaskbar = false
+        };
+
+        var monoBox = CreateBandCountTextBox(_monoCustomAnalyzerBandCount);
+        var stereoBox = CreateBandCountTextBox(_stereoCustomAnalyzerBandCount);
+        var monoWidthBox = CreateAnalyzerLayoutTextBox(_monoAnalyzerMaxBandWidth);
+        var stereoWidthBox = CreateAnalyzerLayoutTextBox(_stereoAnalyzerMaxBandWidth);
+        var monoGapBox = CreateAnalyzerLayoutTextBox(_monoAnalyzerMaxBandGap);
+        var stereoGapBox = CreateAnalyzerLayoutTextBox(_stereoAnalyzerMaxBandGap);
+        var okButton = new Button { Content = "OK", MinWidth = 76, IsDefault = true };
+        var cancelButton = new Button { Content = "Cancel", MinWidth = 76, IsCancel = true };
+        okButton.Click += (_, _) =>
+        {
+            if (!TryReadBandCount(monoBox, out int mono) || !TryReadBandCount(stereoBox, out int stereo) ||
+                !TryReadLayoutValue(monoWidthBox, 4, 320, out double monoWidth) ||
+                !TryReadLayoutValue(stereoWidthBox, 4, 160, out double stereoWidth) ||
+                !TryReadLayoutValue(monoGapBox, 1, 48, out double monoGap) ||
+                !TryReadLayoutValue(stereoGapBox, 1, 32, out double stereoGap))
+            {
+                MessageBox.Show(
+                    dialog,
+                    $"Bands: {Defaults.MinAnalyzerBandCount}-{Defaults.MaxAnalyzerBandCount}\n" +
+                    "Mono width: 4-320, Stereo width: 4-160\n" +
+                    "Mono gap: 1-48, Stereo gap: 1-32",
+                    "Analyzer Band Settings",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            _monoCustomAnalyzerBandCount = mono;
+            _stereoCustomAnalyzerBandCount = stereo;
+            _monoAnalyzerMaxBandWidth = monoWidth;
+            _stereoAnalyzerMaxBandWidth = stereoWidth;
+            _monoAnalyzerMaxBandGap = monoGap;
+            _stereoAnalyzerMaxBandGap = stereoGap;
+            if (DisplayModeCombo.SelectedIndex == 1)
+                _monoAnalyzerBandCount = mono;
+            else if (DisplayModeCombo.SelectedIndex == 2)
+                _stereoAnalyzerBandCount = stereo;
+            dialog.DialogResult = true;
+        };
+
+        var grid = new Grid { Margin = new Thickness(18) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+        for (int row = 0; row < 7; row++)
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        AddBandDialogRow(grid, 0, "Mono custom bands", monoBox);
+        AddBandDialogRow(grid, 1, "Stereo custom bands", stereoBox);
+        AddBandDialogRow(grid, 2, "Mono max bar width", monoWidthBox);
+        AddBandDialogRow(grid, 3, "Stereo max bar width", stereoWidthBox);
+        AddBandDialogRow(grid, 4, "Mono max band gap", monoGapBox);
+        AddBandDialogRow(grid, 5, "Stereo max band gap", stereoGapBox);
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 14, 0, 0)
+        };
+        buttons.Children.Add(okButton);
+        buttons.Children.Add(cancelButton);
+        Grid.SetRow(buttons, 6);
+        Grid.SetColumnSpan(buttons, 2);
+        grid.Children.Add(buttons);
+        dialog.Content = grid;
+
+        if (dialog.ShowDialog() == true)
+        {
+            ResizeAnalyzerBuffers();
+            ResetDisplayHistory();
+            UpdateAnalyzerBandsButton();
+            SaveSettings();
+        }
+    }
+
+    private static TextBox CreateBandCountTextBox(int value) => new()
+    {
+        Text = value.ToString(CultureInfo.InvariantCulture),
+        Width = 72,
+        Height = 28,
+        Margin = new Thickness(12, 4, 0, 4),
+        Foreground = new SolidColorBrush(Color.FromRgb(230, 237, 243)),
+        Background = new SolidColorBrush(Color.FromRgb(10, 15, 20)),
+        BorderBrush = new SolidColorBrush(Color.FromRgb(51, 65, 79)),
+        TextAlignment = TextAlignment.Right,
+        VerticalContentAlignment = VerticalAlignment.Center
+    };
+
+    private static TextBox CreateAnalyzerLayoutTextBox(double value)
+    {
+        var textBox = CreateBandCountTextBox((int)Math.Round(value));
+        textBox.Text = value.ToString("0.#", CultureInfo.InvariantCulture);
+        return textBox;
+    }
+
+    private static void AddBandDialogRow(Grid grid, int row, string label, TextBox textBox)
+    {
+        var text = new TextBlock
+        {
+            Text = label,
+            Foreground = new SolidColorBrush(Color.FromRgb(230, 237, 243)),
+            Margin = new Thickness(0, 4, 0, 4)
+        };
+        Grid.SetRow(text, row);
+        Grid.SetColumn(text, 0);
+        Grid.SetRow(textBox, row);
+        Grid.SetColumn(textBox, 1);
+        grid.Children.Add(text);
+        grid.Children.Add(textBox);
+    }
+
+    private static bool TryReadBandCount(TextBox textBox, out int count) =>
+        int.TryParse(textBox.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out count) &&
+        count is >= Defaults.MinAnalyzerBandCount and <= Defaults.MaxAnalyzerBandCount;
+
+    private static bool TryReadLayoutValue(TextBox textBox, double minimum, double maximum, out double value) =>
+        (double.TryParse(textBox.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out value) ||
+         double.TryParse(textBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) &&
+        value >= minimum && value <= maximum;
+
+    private void SetActiveAnalyzerBandCount(int count)
+    {
+        count = Math.Clamp(count, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
+        if (DisplayModeCombo.SelectedIndex == 2)
+            _stereoAnalyzerBandCount = count;
+        else
+            _monoAnalyzerBandCount = count;
+
+        ResizeAnalyzerBuffers();
+        ResetDisplayHistory();
+        UpdateAnalyzerBandsButton();
+        SaveSettings();
+    }
+
+    private void ResizeAnalyzerBuffers()
+    {
+        int monoCount = Math.Clamp(_monoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
+        int stereoCount = Math.Clamp(_stereoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
+        if (_analyzerLevels.Length != monoCount)
+        {
+            _analyzerLevels = CreateAnalyzerValues(monoCount);
+            _analyzerHolds = CreateAnalyzerValues(monoCount);
+            _analyzerHoldUntil = new DateTime[monoCount];
+        }
+
+        if (_leftAnalyzerLevels.Length != stereoCount)
+        {
+            _leftAnalyzerLevels = CreateAnalyzerValues(stereoCount);
+            _leftAnalyzerHolds = CreateAnalyzerValues(stereoCount);
+            _leftAnalyzerHoldUntil = new DateTime[stereoCount];
+            _rightAnalyzerLevels = CreateAnalyzerValues(stereoCount);
+            _rightAnalyzerHolds = CreateAnalyzerValues(stereoCount);
+            _rightAnalyzerHoldUntil = new DateTime[stereoCount];
+        }
+    }
+
+    private void UpdateAnalyzerBandsButton()
+    {
+        if (AnalyzerBandsButton == null)
+            return;
+
+        AnalyzerBandsButton.Content = $"Bands: {ActiveAnalyzerBandCount}";
+        AnalyzerBandsButton.IsEnabled = DisplayModeCombo.SelectedIndex > 0;
+        AnalyzerBandsButton.Opacity = AnalyzerBandsButton.IsEnabled ? 1.0 : 0.42;
+    }
+
+    private void SyncAnalyzerBandMenuChecks()
+    {
+        if (AnalyzerBandsButton.ContextMenu == null)
+            return;
+
+        int active = ActiveAnalyzerBandCount;
+        int custom = DisplayModeCombo.SelectedIndex == 2
+            ? _stereoCustomAnalyzerBandCount
+            : _monoCustomAnalyzerBandCount;
+        bool presetMatched = false;
+        foreach (var item in AnalyzerBandsButton.ContextMenu.Items.OfType<MenuItem>())
+        {
+            if (item.Tag is string value &&
+                int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int count))
+            {
+                item.IsChecked = count == active;
+                presetMatched |= item.IsChecked;
+            }
+        }
+
+        AnalyzerBandCustomMenuItem.IsChecked = !presetMatched && active == custom;
+    }
+
+    private void SyncDisplayModeContextMenu()
+    {
+        if (ContextDisplaySpectrogramMenuItem == null)
+            return;
+
+        ContextDisplaySpectrogramMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 0;
+        ContextDisplayAnalyzerMonoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 1;
+        ContextDisplayAnalyzerStereoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 2;
     }
 
     private void LayoutMenuItem_Click(object sender, RoutedEventArgs e)
@@ -1915,8 +2406,8 @@ public partial class MainWindow : Window
         FpsButton.MinWidth = compact ? 72 : 78;
         MeterColorCombo.Width = compact ? 72 : 96;
         MeterColorCombo.MinWidth = compact ? 72 : 96;
-        MeterStyleCombo.Width = compact ? 78 : 96;
-        MeterStyleCombo.MinWidth = compact ? 78 : 96;
+        MeterStyleCombo.Width = compact ? 118 : 150;
+        MeterStyleCombo.MinWidth = compact ? 118 : 150;
 
         foreach (var combo in new[] { DisplayModeCombo, MeterColorCombo, MeterStyleCombo })
             combo.Margin = compact ? new Thickness(4, 0, 7, 0) : new Thickness(8, 0, 14, 0);
@@ -2058,7 +2549,7 @@ public partial class MainWindow : Window
         DependencyObject? source = e.OriginalSource as DependencyObject;
         while (source != null)
         {
-            if (source is ButtonBase or Selector or Slider or MenuBase or TextBoxBase or ScrollBar or Thumb)
+            if (source is VfdStatusDisplay or ButtonBase or Selector or Slider or MenuBase or TextBoxBase or ScrollBar or Thumb)
                 return;
             source = VisualTreeHelper.GetParent(source);
         }

@@ -246,6 +246,14 @@
                 <MenuItem Header="Show level meter" x:Name="ContextLevelMeterMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
                 <Separator/>
                 <MenuItem Header="Compact mode" x:Name="ContextCompactMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Display Mode">
+                    <MenuItem Header="Spectrogram" x:Name="ContextDisplaySpectrogramMenuItem"
+                              IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
+                    <MenuItem Header="Spectrum Analyzer (Mono)" x:Name="ContextDisplayAnalyzerMonoMenuItem"
+                              IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
+                    <MenuItem Header="Spectrum Analyzer (Stereo)" x:Name="ContextDisplayAnalyzerStereoMenuItem"
+                              IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
+                </MenuItem>
                 <MenuItem Header="LIVE TIME display">
                     <MenuItem Header="Dot matrix" x:Name="ContextStatusDotMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>
                     <MenuItem Header="16 segment" x:Name="ContextStatusSegmentMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>
@@ -310,8 +318,16 @@
                     <TextBlock Text="Source" FontWeight="SemiBold"/>
                     <ComboBox x:Name="ModeCombo" Grid.Column="1" SelectionChanged="ModeCombo_SelectionChanged"/>
                     <TextBlock Grid.Column="2" Text="Device" FontWeight="SemiBold"/>
-                    <ComboBox x:Name="DeviceCombo" Grid.Column="3" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"
-                              SelectionChanged="DeviceCombo_SelectionChanged"/>
+                    <StackPanel Grid.Column="3" Orientation="Horizontal">
+                        <ComboBox x:Name="DeviceCombo" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"
+                                  SelectionChanged="DeviceCombo_SelectionChanged"/>
+                        <CheckBox x:Name="CompensateSystemVolumeCheck" Content="Ignore System Volume"
+                                  Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"
+                                  Foreground="#E6EDF3"
+                                  Checked="CompensateSystemVolumeCheck_Changed"
+                                  Unchecked="CompensateSystemVolumeCheck_Changed"
+                                  ToolTip="Compensate Windows output-volume attenuation so System Output is captured and displayed near its 100% volume level. Muted or 0% audio cannot be restored."/>
+                    </StackPanel>
                     <StackPanel Grid.Column="4" Orientation="Horizontal">
                         <Button x:Name="StartButton" Click="StartButton_Click">
                             <Grid Width="64" Height="22">
@@ -371,6 +387,27 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Display"/>
                         <ComboBox x:Name="DisplayModeCombo" Width="210" MinWidth="210" Margin="8,0,14,0" SelectionChanged="DisplayModeCombo_SelectionChanged"/>
+                        <Button x:Name="AnalyzerBandsButton" Content="Bands: 48" MinWidth="86" Height="32"
+                                Margin="0,0,14,0" Click="AnalyzerBandsButton_Click"
+                                ToolTip="Set the spectrum analyzer frequency-band count independently for Mono and Stereo.">
+                            <Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="5 bands" Tag="5" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <MenuItem Header="7 bands" Tag="7" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <MenuItem Header="9 bands" Tag="9" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <MenuItem Header="10 bands" Tag="10" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <MenuItem Header="12 bands" Tag="12" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <MenuItem Header="14 bands" Tag="14" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <MenuItem Header="18 bands" Tag="18" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <MenuItem Header="27 bands" Tag="27" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <MenuItem Header="48 bands (default)" Tag="48" IsCheckable="True" Click="AnalyzerBandPresetMenuItem_Click"/>
+                                    <Separator/>
+                                    <MenuItem Header="User Custom" x:Name="AnalyzerBandCustomMenuItem"
+                                              IsCheckable="True" Click="AnalyzerBandCustomMenuItem_Click"/>
+                                    <MenuItem Header="Detailed settings..." Click="AnalyzerBandDetailsMenuItem_Click"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
                         <Button x:Name="FpsButton" Content="FPS: 60" MinWidth="78" Height="32" Margin="0,0,14,0"
                                 Click="FpsButton_Click"
                                 ToolTip="Choose a render-rate preset or open detailed FPS adjustment.">
@@ -410,7 +447,7 @@
                         <TextBlock Text="Color"/>
                         <ComboBox x:Name="MeterColorCombo" Width="96" MinWidth="96" Margin="8,0,14,0" SelectionChanged="MeterSetting_Changed"/>
                         <TextBlock Text="Meter"/>
-                        <ComboBox x:Name="MeterStyleCombo" Width="96" MinWidth="96" Margin="8,0,14,0" SelectionChanged="MeterSetting_Changed"/>
+                        <ComboBox x:Name="MeterStyleCombo" Width="150" MinWidth="150" Margin="8,0,14,0" SelectionChanged="MeterSetting_Changed"/>
                         <CheckBox x:Name="VuNormalizeCheck" Content="VU" IsChecked="False" Foreground="#E6EDF3" VerticalAlignment="Center"
                                   Margin="0,0,12,0" Checked="MeterVisualSetting_Changed" Unchecked="MeterVisualSetting_Changed"
                                   ToolTip="Boost meter and analyzer display only, so nominal levels touch 0 dB/red like an analog deck."/>
@@ -500,7 +537,12 @@
                         <ColumnDefinition x:Name="VfdStatusColumn" Width="190"/>
                     </Grid.ColumnDefinitions>
                     <local:VfdLevelMeter x:Name="LevelMeter" VerticalAlignment="Stretch"/>
-                    <local:VfdStatusDisplay x:Name="VfdStatus" Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Stretch"/>
+                    <local:VfdStatusDisplay x:Name="VfdStatus" Grid.Column="1" Margin="8,0,0,0"
+                                            VerticalAlignment="Stretch" Cursor="Hand"
+                                            PreviewMouseLeftButtonDown="VfdStatus_PreviewMouseLeftButtonDown"
+                                            PreviewMouseMove="VfdStatus_PreviewMouseMove"
+                                            MouseLeftButtonUp="VfdStatus_MouseLeftButtonUp"
+                                            ToolTip="Click during LIVE monitoring to toggle elapsed time and clock display."/>
                 </Grid>
             </Border>
         </Grid>

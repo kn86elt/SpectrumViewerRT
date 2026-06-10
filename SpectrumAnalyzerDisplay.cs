@@ -11,12 +11,15 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
     private double[] _rightLevels = Array.Empty<double>();
     private double[] _rightHolds = Array.Empty<double>();
     private bool _stereo;
+    private readonly DotMatrixVfdRasterizer _dotRasterizer = new();
 
     public int ColorTheme { get; set; }
     public int MeterStyle { get; set; }
     public bool ShowUnlitSegments { get; set; } = true;
     public bool GlowEnabled { get; set; } = true;
     public bool TextureEnabled { get; set; } = true;
+    public double MaximumBandWidth { get; set; } = Defaults.MonoAnalyzerMaxBandWidth;
+    public double MaximumBandGap { get; set; } = Defaults.MonoAnalyzerMaxBandGap;
 
     public void Update(double[] levels, double[] holds, int colorTheme, int meterStyle, bool showUnlitSegments, bool glowEnabled, bool textureEnabled)
     {
@@ -26,7 +29,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         _rightHolds = Array.Empty<double>();
         _stereo = false;
         ApplyVisualSettings(colorTheme, meterStyle, showUnlitSegments, glowEnabled, textureEnabled);
-        InvalidateVisual();
+        InvalidateWhenVisualChanges();
     }
 
     public void UpdateStereo(double[] leftLevels, double[] leftHolds, double[] rightLevels, double[] rightHolds, int colorTheme, int meterStyle, bool showUnlitSegments, bool glowEnabled, bool textureEnabled)
@@ -37,7 +40,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         _rightHolds = rightHolds;
         _stereo = true;
         ApplyVisualSettings(colorTheme, meterStyle, showUnlitSegments, glowEnabled, textureEnabled);
-        InvalidateVisual();
+        InvalidateWhenVisualChanges();
     }
 
     private void ApplyVisualSettings(int colorTheme, int meterStyle, bool showUnlitSegments, bool glowEnabled, bool textureEnabled)
@@ -49,6 +52,11 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         TextureEnabled = textureEnabled;
     }
 
+    private void InvalidateWhenVisualChanges()
+    {
+        InvalidateVisual();
+    }
+
     protected override void OnRender(DrawingContext dc)
     {
         var bounds = new Rect(0, 0, ActualWidth, ActualHeight);
@@ -58,18 +66,34 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         if (_levels.Length == 0 || ActualWidth < 40 || ActualHeight < 40)
             return;
 
+        bool dotMatrix = MeterStyle is 2 or 3;
+        if (dotMatrix)
+            _dotRasterizer.Begin(ActualWidth, ActualHeight, VisualTreeHelper.GetDpi(this));
+
         if (_stereo && _rightLevels.Length > 0)
         {
             double gap = 24;
             double panelWidth = Math.Max(1, (ActualWidth - gap) / 2.0);
             DrawAnalyzerPanel(dc, _levels, _holds, new Rect(0, 0, panelWidth, ActualHeight), "L");
             DrawAnalyzerPanel(dc, _rightLevels, _rightHolds, new Rect(panelWidth + gap, 0, panelWidth, ActualHeight), "R");
+            DrawDotMatrixLayer(dc, bounds, dotMatrix);
             DrawTexture(dc, bounds);
             return;
         }
 
         DrawAnalyzerPanel(dc, _levels, _holds, bounds, string.Empty);
+        DrawDotMatrixLayer(dc, bounds, dotMatrix);
         DrawTexture(dc, bounds);
+    }
+
+    private void DrawDotMatrixLayer(DrawingContext dc, Rect bounds, bool enabled)
+    {
+        if (!enabled)
+            return;
+
+        var image = _dotRasterizer.Commit();
+        if (image != null)
+            dc.DrawImage(image, bounds);
     }
 
     private void DrawAnalyzerPanel(DrawingContext dc, double[] levels, double[] holds, Rect bounds, string label)
@@ -86,13 +110,18 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
             DrawTextCentered(dc, label, bounds.Left + bounds.Width / 2.0, 5, 14, ActiveColor());
 
         int bands = levels.Length;
-        double gap = 3;
-        double bandWidth = Math.Max(3, (width - gap * (bands - 1)) / bands);
+        double gap = bands <= 1
+            ? 0
+            : Math.Clamp(width / Math.Max(1, bands * 8.0), 3, MaximumBandGap);
+        double bandWidth = Math.Max(3, Math.Min(MaximumBandWidth, (width - gap * (bands - 1)) / bands));
+        if (bands > 1 && bandWidth >= MaximumBandWidth)
+            gap = Math.Clamp((width - bands * bandWidth) / (bands - 1), 3, MaximumBandGap);
+        double usedWidth = Math.Min(width, bands * bandWidth + gap * (bands - 1));
 
-        if (MeterStyle == 1)
+        if (MeterStyle is 1 or 3)
         {
             DrawFineLineAnalyzer(dc, levels, holds, left, top, bottom, bandWidth, gap);
-            DrawFrequencyLabels(dc, left, bottom + 7, width);
+            DrawFrequencyLabels(dc, left, bottom + 7, usedWidth);
             return;
         }
 
@@ -117,12 +146,15 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
                 DrawAnalyzerSegment(dc, rect, color, active);
             }
 
-            double holdY = bottom - (holdRow + 1) * rowHeight - holdRow * rowGap;
-            var holdRect = new Rect(x, holdY, bandWidth, rowHeight);
-            DrawAnalyzerSegment(dc, holdRect, SegmentColor(RowToDb(holdRow, rows), true), true);
+            if (holdDb > -60.0)
+            {
+                double holdY = bottom - (holdRow + 1) * rowHeight - holdRow * rowGap;
+                var holdRect = new Rect(x, holdY, bandWidth, rowHeight);
+                DrawAnalyzerSegment(dc, holdRect, SegmentColor(RowToDb(holdRow, rows), true), true);
+            }
         }
 
-        DrawFrequencyLabels(dc, left, bottom + 7, width);
+        DrawFrequencyLabels(dc, left, bottom + 7, usedWidth);
     }
 
     private void DrawFineLineAnalyzer(
@@ -161,7 +193,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
             {
                 double blockPosition = blockCount == 1 ? 0 : block / (double)(blockCount - 1);
                 double blockDb = -60 + blockPosition * 74;
-                bool active = block < activeBlock || block == holdBlock;
+                bool active = block < activeBlock || holdDb > -60.0 && block == holdBlock;
                 Color color = SegmentColor(blockDb, active);
                 int blockBottomPixel = bottomPixel - block * profile.BlockPitchPixels;
 
@@ -194,6 +226,12 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         Color color,
         bool active)
     {
+        if (MeterStyle == 3)
+        {
+            DrawDotMatrixRow(dc, x, y, width, pixelHeight, color, active);
+            return;
+        }
+
         if (active && GlowEnabled)
         {
             dc.DrawRectangle(
@@ -203,6 +241,21 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         }
 
         dc.DrawRectangle(new SolidColorBrush(color), null, new Rect(x, y, width, pixelHeight));
+    }
+
+    private void DrawDotMatrixRow(
+        DrawingContext dc,
+        double x,
+        double y,
+        double width,
+        double pixelHeight,
+        Color color,
+        bool active)
+    {
+        _dotRasterizer.DrawDots(
+            new Rect(x, y, width, pixelHeight),
+            color,
+            active && GlowEnabled);
     }
 
     private void DrawDbGrid(DrawingContext dc, double labelX, double left, double top, double width, double height)
@@ -217,11 +270,25 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
     private void DrawFrequencyLabels(DrawingContext dc, double left, double y, double width)
     {
-        string[] labels = { "50", "100", "200", "500", "1k", "2k", "5k", "10k", "20k" };
-        for (int i = 0; i < labels.Length; i++)
+        (double Frequency, string Label)[] labels = width switch
         {
-            double x = left + i / (double)(labels.Length - 1) * width;
-            DrawTextCentered(dc, labels[i], x, y, 11, ActiveColor());
+            < 160 => new[] { (50.0, "50"), (1000.0, "1k"), (20000.0, "20k") },
+            < 300 => new[] { (50.0, "50"), (200.0, "200"), (1000.0, "1k"), (5000.0, "5k"), (20000.0, "20k") },
+            _ => new[]
+            {
+                (50.0, "50"), (100.0, "100"), (200.0, "200"), (500.0, "500"),
+                (1000.0, "1k"), (2000.0, "2k"), (5000.0, "5k"), (10000.0, "10k"), (20000.0, "20k")
+            }
+        };
+
+        const double minimumFrequency = 20.0;
+        const double maximumFrequency = 20000.0;
+        double logRange = Math.Log(maximumFrequency / minimumFrequency);
+        foreach (var label in labels)
+        {
+            double position = Math.Log(label.Frequency / minimumFrequency) / logRange;
+            double x = left + position * width;
+            DrawTextCentered(dc, label.Label, x, y, 11, ActiveColor());
         }
     }
 
@@ -252,6 +319,12 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
     private void DrawAnalyzerSegment(DrawingContext dc, Rect rect, Color color, bool active)
     {
+        if (MeterStyle == 2)
+        {
+            DrawDotMatrixBlock(dc, rect, color, active);
+            return;
+        }
+
         if (active && GlowEnabled)
         {
             dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 36)), null, Inflate(rect, 3.0, 2.0), 2, 2);
@@ -259,6 +332,11 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         }
 
         dc.DrawRoundedRectangle(new SolidColorBrush(color), null, rect, 1, 1);
+    }
+
+    private void DrawDotMatrixBlock(DrawingContext dc, Rect rect, Color color, bool active)
+    {
+        _dotRasterizer.DrawDots(rect, color, active && GlowEnabled);
     }
 
     private Color InactiveColor()

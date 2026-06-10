@@ -17,6 +17,14 @@ public sealed class AppSettings
     public int StatusDisplayStyleIndex { get; set; } = Defaults.StatusDisplayStyleIndex;
     public int DisplayModeIndex { get; set; } = Defaults.DisplayModeIndex;
     public int AnalyzerModeIndex { get; set; } = Defaults.AnalyzerModeIndex;
+    public int MonoAnalyzerBandCount { get; set; } = Defaults.AnalyzerBandCount;
+    public int StereoAnalyzerBandCount { get; set; } = Defaults.AnalyzerBandCount;
+    public int MonoCustomAnalyzerBandCount { get; set; } = Defaults.AnalyzerBandCount;
+    public int StereoCustomAnalyzerBandCount { get; set; } = Defaults.AnalyzerBandCount;
+    public double MonoAnalyzerMaxBandWidth { get; set; } = Defaults.MonoAnalyzerMaxBandWidth;
+    public double StereoAnalyzerMaxBandWidth { get; set; } = Defaults.StereoAnalyzerMaxBandWidth;
+    public double MonoAnalyzerMaxBandGap { get; set; } = Defaults.MonoAnalyzerMaxBandGap;
+    public double StereoAnalyzerMaxBandGap { get; set; } = Defaults.StereoAnalyzerMaxBandGap;
     public bool AlwaysOnTop { get; set; } = Defaults.AlwaysOnTop;
     public bool ShowTransportPanel { get; set; } = Defaults.ShowTransportPanel;
     public bool ShowSettingsPanel { get; set; } = Defaults.ShowSettingsPanel;
@@ -34,6 +42,7 @@ public sealed class AppSettings
     public bool GlowEnabled { get; set; } = Defaults.GlowEnabled;
     public bool TextureEnabled { get; set; } = Defaults.TextureEnabled;
     public bool VuNormalizeEnabled { get; set; } = Defaults.VuNormalizeEnabled;
+    public bool CompensateSystemOutputVolume { get; set; } = Defaults.CompensateSystemOutputVolume;
 
     public static string SettingsPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpectrumViewerRT", "settings.json");
@@ -73,10 +82,18 @@ public sealed class AppSettings
         ScaleIndex = Math.Clamp(ScaleIndex, 0, 1);
         MaxFrequencyIndex = Math.Clamp(MaxFrequencyIndex, 0, 4);
         MeterColorIndex = Math.Clamp(MeterColorIndex, 0, 3);
-        MeterStyleIndex = Math.Clamp(MeterStyleIndex, 0, 1);
+        MeterStyleIndex = Math.Clamp(MeterStyleIndex, 0, 3);
         StatusDisplayStyleIndex = Math.Clamp(StatusDisplayStyleIndex, 0, 1);
         DisplayModeIndex = Math.Clamp(DisplayModeIndex, 0, 2);
         AnalyzerModeIndex = Math.Clamp(AnalyzerModeIndex, 0, 1);
+        MonoAnalyzerBandCount = Math.Clamp(MonoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
+        StereoAnalyzerBandCount = Math.Clamp(StereoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
+        MonoCustomAnalyzerBandCount = Math.Clamp(MonoCustomAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
+        StereoCustomAnalyzerBandCount = Math.Clamp(StereoCustomAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
+        MonoAnalyzerMaxBandWidth = Math.Clamp(MonoAnalyzerMaxBandWidth, 4, 320);
+        StereoAnalyzerMaxBandWidth = Math.Clamp(StereoAnalyzerMaxBandWidth, 4, 160);
+        MonoAnalyzerMaxBandGap = Math.Clamp(MonoAnalyzerMaxBandGap, 1, 48);
+        StereoAnalyzerMaxBandGap = Math.Clamp(StereoAnalyzerMaxBandGap, 1, 32);
         return this;
     }
 }
@@ -103,6 +120,13 @@ public static class Defaults
     public const int StatusDisplayStyleIndex = 0;
     public const int DisplayModeIndex = 0;
     public const int AnalyzerModeIndex = 0;
+    public const int AnalyzerBandCount = 48;
+    public const int MinAnalyzerBandCount = 3;
+    public const int MaxAnalyzerBandCount = 96;
+    public const double MonoAnalyzerMaxBandWidth = 240;
+    public const double StereoAnalyzerMaxBandWidth = 120;
+    public const double MonoAnalyzerMaxBandGap = 24;
+    public const double StereoAnalyzerMaxBandGap = 16;
     public const bool GridEnabled = true;
     public const bool AlwaysOnTop = false;
     public const bool ShowTransportPanel = true;
@@ -120,4 +144,5 @@ public static class Defaults
     public const bool GlowEnabled = true;
     public const bool TextureEnabled = true;
     public const bool VuNormalizeEnabled = false;
+    public const bool CompensateSystemOutputVolume = false;
 }
