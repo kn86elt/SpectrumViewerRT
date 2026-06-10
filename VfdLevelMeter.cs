@@ -114,8 +114,8 @@ public sealed class VfdLevelMeter : FrameworkElement
             return;
 
         dc.PushClip(new RectangleGeometry(bounds));
-        dc.PushTransform(new ScaleTransform(contentScale, contentScale));
-        DrawMeterContent(dc, ActualWidth / contentScale, designHeight);
+        dc.PushTransform(new ScaleTransform(1.0, contentScale));
+        DrawMeterContent(dc, ActualWidth, designHeight);
         dc.Pop();
         dc.Pop();
         DrawTexture(dc, bounds);
@@ -141,6 +141,12 @@ public sealed class VfdLevelMeter : FrameworkElement
     {
         DrawText(dc, label, 10, y, 9, ActiveColor());
 
+        if (MeterStyle == 1)
+        {
+            DrawFineLineRow(dc, level, peakHold, x, y, width, height);
+            return;
+        }
+
         int segments = Math.Max(32, (int)(width / 8));
         double gap = 2;
         double segmentWidth = Math.Max(2, (width - gap * (segments - 1)) / segments);
@@ -163,47 +169,83 @@ public sealed class VfdLevelMeter : FrameworkElement
         DrawSegment(dc, holdRect, SegmentColor(holdSegmentDb, true), true);
     }
 
-    private void DrawSegment(DrawingContext dc, Rect rect, Color color, bool active)
+    private void DrawFineLineRow(DrawingContext dc, double level, double peakHold, double x, double y, double width, double height)
     {
-        if (MeterStyle == 0)
-        {
-            if (active && GlowEnabled)
-            {
-                dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 42)), null, Inflate(rect, 2.4, 2.0), 2.2, 2.2);
-                dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 78)), null, Inflate(rect, 1.1, 0.9), 1.8, 1.8);
-            }
+        var profile = FineLineVfdLayout.LevelMeter;
+        double dpiScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        int firstPixel = (int)Math.Ceiling(x * dpiScale);
+        int lastPixel = (int)Math.Floor((x + width) * dpiScale) - 1;
+        int blockCount = Math.Max(1,
+            (lastPixel - firstPixel + profile.BlockPitchPixels) /
+            profile.BlockPitchPixels);
+        double db = LevelToDb(level);
+        double holdDb = LevelToDb(peakHold);
+        int activeBlock = Math.Clamp(
+            (int)Math.Floor(DbToPosition(db) * blockCount),
+            0,
+            blockCount);
+        int holdBlock = Math.Clamp(
+            (int)Math.Round(DbToPosition(holdDb) * (blockCount - 1)),
+            0,
+            blockCount - 1);
 
-            dc.DrawRoundedRectangle(new SolidColorBrush(color), null, rect, 1, 1);
-            return;
-        }
+        dc.PushClip(new RectangleGeometry(new Rect(x, y, width, height)));
+        for (int block = 0; block < blockCount; block++)
+        {
+            int blockPixel = firstPixel + block * profile.BlockPitchPixels;
+            double blockPosition = blockCount == 1 ? 0 : block / (double)(blockCount - 1);
+            double blockDb = -60 + blockPosition * 74;
+            bool active = block < activeBlock || block == holdBlock;
+            Color color = SegmentColor(blockDb, active);
 
-        var brush = new SolidColorBrush(color);
-        int lines = Math.Max(2, Math.Min(4, (int)Math.Floor(rect.Width / 2.0)));
-        double lineWidth = 1.0;
-        double innerWidth = Math.Max(0, rect.Width - lineWidth);
-        var guidelines = new GuidelineSet();
-        for (int i = 0; i < lines; i++)
-        {
-            double t = lines == 1 ? 0 : i / (double)(lines - 1);
-            double x = Math.Round(rect.Left + t * innerWidth) + 0.5;
-            guidelines.GuidelinesX.Add(x);
-            guidelines.GuidelinesX.Add(x + lineWidth);
-        }
-        guidelines.GuidelinesY.Add(Math.Round(rect.Top) + 0.5);
-        guidelines.GuidelinesY.Add(Math.Round(rect.Bottom) + 0.5);
-        dc.PushGuidelineSet(guidelines);
-        for (int i = 0; i < lines; i++)
-        {
-            double t = lines == 1 ? 0 : i / (double)(lines - 1);
-            double x = Math.Round(rect.Left + t * innerWidth) + 0.5;
-            if (active && GlowEnabled)
+            for (int line = 0; line < profile.LinesPerBlock; line++)
             {
-                var glowBrush = new SolidColorBrush(WithAlpha(color, 60));
-                dc.DrawRectangle(glowBrush, null, new Rect(x - 1.5, rect.Top - 1, 4.0, rect.Height + 2));
+                int pixelX = blockPixel + line * profile.LinePitchPixels;
+                if (pixelX > lastPixel)
+                    break;
+
+                DrawDevicePixelLine(
+                    dc,
+                    pixelX / dpiScale,
+                    y,
+                    height,
+                    profile.LineThicknessPixels / dpiScale,
+                    color,
+                    active);
             }
-            dc.DrawRectangle(brush, null, new Rect(x, rect.Top, lineWidth, rect.Height));
         }
         dc.Pop();
+    }
+
+    private void DrawDevicePixelLine(
+        DrawingContext dc,
+        double x,
+        double y,
+        double height,
+        double pixelWidth,
+        Color color,
+        bool active)
+    {
+        if (active && GlowEnabled)
+        {
+            dc.DrawRectangle(
+                new SolidColorBrush(WithAlpha(color, 60)),
+                null,
+                new Rect(x - pixelWidth, y, pixelWidth * 3, height));
+        }
+
+        dc.DrawRectangle(new SolidColorBrush(color), null, new Rect(x, y, pixelWidth, height));
+    }
+
+    private void DrawSegment(DrawingContext dc, Rect rect, Color color, bool active)
+    {
+        if (active && GlowEnabled)
+        {
+            dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 42)), null, Inflate(rect, 2.4, 2.0), 2.2, 2.2);
+            dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 78)), null, Inflate(rect, 1.1, 0.9), 1.8, 1.8);
+        }
+
+        dc.DrawRoundedRectangle(new SolidColorBrush(color), null, rect, 1, 1);
     }
 
     private void DrawScale(DrawingContext dc, double x, double y, double width)

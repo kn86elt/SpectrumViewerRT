@@ -88,6 +88,14 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         int bands = levels.Length;
         double gap = 3;
         double bandWidth = Math.Max(3, (width - gap * (bands - 1)) / bands);
+
+        if (MeterStyle == 1)
+        {
+            DrawFineLineAnalyzer(dc, levels, holds, left, top, bottom, bandWidth, gap);
+            DrawFrequencyLabels(dc, left, bottom + 7, width);
+            return;
+        }
+
         int rows = 22;
         double rowGap = 2;
         double rowHeight = Math.Max(2, (height - rowGap * (rows - 1)) / rows);
@@ -115,6 +123,86 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         }
 
         DrawFrequencyLabels(dc, left, bottom + 7, width);
+    }
+
+    private void DrawFineLineAnalyzer(
+        DrawingContext dc,
+        double[] levels,
+        double[] holds,
+        double left,
+        double top,
+        double bottom,
+        double bandWidth,
+        double bandGap)
+    {
+        var profile = FineLineVfdLayout.SpectrumAnalyzer;
+        double dpiScale = VisualTreeHelper.GetDpi(this).DpiScaleY;
+        int topPixel = (int)Math.Ceiling(top * dpiScale);
+        int bottomPixel = (int)Math.Floor(bottom * dpiScale) - 1;
+        int blockCount = Math.Max(1,
+            (bottomPixel - topPixel + profile.BlockPitchPixels) /
+            profile.BlockPitchPixels);
+
+        for (int band = 0; band < levels.Length; band++)
+        {
+            double x = left + band * (bandWidth + bandGap);
+            int activeBlock = Math.Clamp(
+                (int)Math.Floor(DbToNormalized(levels[band]) * blockCount),
+                0,
+                blockCount);
+            double holdDb = band < holds.Length ? holds[band] : -90;
+            int holdBlock = Math.Clamp(
+                (int)Math.Round(DbToNormalized(holdDb) * (blockCount - 1)),
+                0,
+                blockCount - 1);
+
+            dc.PushClip(new RectangleGeometry(new Rect(x, top, bandWidth, bottom - top)));
+            for (int block = 0; block < blockCount; block++)
+            {
+                double blockPosition = blockCount == 1 ? 0 : block / (double)(blockCount - 1);
+                double blockDb = -60 + blockPosition * 74;
+                bool active = block < activeBlock || block == holdBlock;
+                Color color = SegmentColor(blockDb, active);
+                int blockBottomPixel = bottomPixel - block * profile.BlockPitchPixels;
+
+                for (int line = 0; line < profile.LinesPerBlock; line++)
+                {
+                    int pixelY = blockBottomPixel - line * profile.LinePitchPixels;
+                    if (pixelY < topPixel)
+                        break;
+
+                    DrawDevicePixelRow(
+                        dc,
+                        x,
+                        pixelY / dpiScale,
+                        bandWidth,
+                        profile.LineThicknessPixels / dpiScale,
+                        color,
+                        active);
+                }
+            }
+            dc.Pop();
+        }
+    }
+
+    private void DrawDevicePixelRow(
+        DrawingContext dc,
+        double x,
+        double y,
+        double width,
+        double pixelHeight,
+        Color color,
+        bool active)
+    {
+        if (active && GlowEnabled)
+        {
+            dc.DrawRectangle(
+                new SolidColorBrush(WithAlpha(color, 58)),
+                null,
+                new Rect(x, y - pixelHeight, width, pixelHeight * 3));
+        }
+
+        dc.DrawRectangle(new SolidColorBrush(color), null, new Rect(x, y, width, pixelHeight));
     }
 
     private void DrawDbGrid(DrawingContext dc, double labelX, double left, double top, double width, double height)
@@ -164,12 +252,6 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
     private void DrawAnalyzerSegment(DrawingContext dc, Rect rect, Color color, bool active)
     {
-        if (MeterStyle == 1)
-        {
-            DrawFineLineSegment(dc, rect, color, active);
-            return;
-        }
-
         if (active && GlowEnabled)
         {
             dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 36)), null, Inflate(rect, 3.0, 2.0), 2, 2);
@@ -177,34 +259,6 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         }
 
         dc.DrawRoundedRectangle(new SolidColorBrush(color), null, rect, 1, 1);
-    }
-
-    private void DrawFineLineSegment(DrawingContext dc, Rect rect, Color color, bool active)
-    {
-        var brush = new SolidColorBrush(color);
-        int lines = Math.Max(2, Math.Min(4, (int)Math.Floor(rect.Height / 2.0)));
-        double lineHeight = 1.0;
-        double innerHeight = Math.Max(0, rect.Height - lineHeight);
-        var guidelines = new GuidelineSet();
-        for (int i = 0; i < lines; i++)
-        {
-            double t = lines == 1 ? 0 : i / (double)(lines - 1);
-            double y = Math.Round(rect.Top + t * innerHeight) + 0.5;
-            guidelines.GuidelinesY.Add(y);
-            guidelines.GuidelinesY.Add(y + lineHeight);
-        }
-        guidelines.GuidelinesX.Add(Math.Round(rect.Left) + 0.5);
-        guidelines.GuidelinesX.Add(Math.Round(rect.Right) + 0.5);
-        dc.PushGuidelineSet(guidelines);
-        for (int i = 0; i < lines; i++)
-        {
-            double t = lines == 1 ? 0 : i / (double)(lines - 1);
-            double y = Math.Round(rect.Top + t * innerHeight) + 0.5;
-            if (active && GlowEnabled)
-                dc.DrawRectangle(new SolidColorBrush(WithAlpha(color, 58)), null, new Rect(rect.Left - 1, y - 1.5, rect.Width + 2, 4.0));
-            dc.DrawRectangle(brush, null, new Rect(rect.Left, y, rect.Width, lineHeight));
-        }
-        dc.Pop();
     }
 
     private Color InactiveColor()
