@@ -1,37 +1,48 @@
 # Spectrum Viewer RT
 
-Windows desktop app for realtime audio monitoring, recording, playback, WAV export, scrolling spectrogram display, and VFD-style spectrum analysis.
+[日本語](README.ja.md)
 
-![Screenshot](screenshot.jpg)
-Spectrogram mode
-(Audio Generated via [imagetoaudio](https://nsspot.herokuapp.com/imagetoaudio/) )
+Spectrum Viewer RT is a Windows desktop application for real-time audio monitoring, recording, playback, WAV export, and VFD-inspired audio visualization.
 
-![Screenshot2](screenshot2.jpg)
-Spectrum Analyzer mode
+![Spectrogram mode](screenshot.jpg)
+
+Spectrogram mode  
+Audio generated with [imagetoaudio](https://nsspot.herokuapp.com/imagetoaudio/).
+
+![Spectrum analyzer mode](screenshot2.jpg)
+
+Spectrum analyzer mode
 
 ## Features
 
-- Microphone input capture
-- Windows default output capture with WASAPI loopback
-- Always-on live monitoring of the selected source
-- Source/device switching while monitoring
-- Dark-blue to red spectrogram color map for clearer level differences
-- Linear / log frequency scale selector
-- Frequency limit selector
-- Toggleable frequency and time grid
-- Adjustable seconds per time division
-- Realtime waveform display
-- Stereo VFD-style level meter with peak hold
-- VU-style display normalization for analog-deck-like meter response
-- Customizable level meter color and block/fine-line style
-- Mono or left/right split spectrum analyzer
-- Time labels are drawn outside the spectrogram area
-- Realtime recording
-- Smooth playback of recorded audio with seek bar
-- WAV export, including stereo WAV for System Output recordings
+- Microphone capture and Windows default-output capture via WASAPI loopback
+- Continuous live monitoring with source and input-device switching
+- Real-time scrolling spectrogram and waveform displays
+- Three display modes: Spectrogram, Spectrum Analyzer (Mono), and Spectrum Analyzer (Stereo)
+- Waveform display remains available in both spectrogram and analyzer modes
+- Linear or logarithmic frequency scale and selectable maximum frequency
+- Toggleable frequency/time grid with adjustable time division
+- VFD-style stereo level meter with peak hold and optional VU normalization
+- VFD color themes, block/fine-line meter styles, dim segments, glow, and display texture
+- LIVE/REC/PLAY time display with dot-matrix or 16-segment characters
+- Real-time recording, playback with seeking, and WAV export
+- Stereo WAV export for System Output recordings
 - 48 kHz / 16-bit processing path
-- Recording level, display gain, display range, FPS controls, and visible-time readout
-- Settings are saved under `%AppData%\SpectrumViewerRT\settings.json`
+- Adjustable recording level and Spectrogram gain, dynamic range, scale, frequency limit, and time grid
+- Global FPS presets (15/30/60) with a live detailed slider and numeric input
+- Normal and Compact window layouts
+- Individually toggleable transport, settings, main display, waveform, and level-meter panels
+- Independent panel visibility settings for Normal and Compact modes
+- Borderless Compact mode with window dragging
+- Right-click menu operation in both Normal and Compact modes
+- Resizable displays that adapt their panel and VFD rendering to the window size
+- Always-on-top option
+- Persistent settings under `%AppData%\SpectrumViewerRT\settings.json`
+
+## Requirements
+
+- Windows x64
+- [.NET 6 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/6.0)
 
 ## Run
 
@@ -43,9 +54,7 @@ Download and extract `SpectrumViewerRT-vX.Y.Z-win-x64.zip`, then run:
 .\SpectrumViewerRT.exe
 ```
 
-The release zip is framework-dependent. Install the .NET 6 Desktop Runtime for Windows x64 if the app does not start:
-
-https://dotnet.microsoft.com/en-us/download/dotnet/6.0
+The release archive is framework-dependent. Install the .NET 6 Desktop Runtime for Windows x64 if the application does not start.
 
 ### From source
 
@@ -53,34 +62,58 @@ https://dotnet.microsoft.com/en-us/download/dotnet/6.0
 dotnet run
 ```
 
-Or start a locally published app:
+To publish a local Release build:
 
 ```powershell
+dotnet publish -c Release
 .\bin\Release\net6.0-windows\publish\SpectrumViewerRT.exe
 ```
 
-## Controls
+## Basic Use
 
 1. Select `Microphone` or `System Output` from `Source`.
-2. For `Microphone`, select the input device from `Device`.
-3. The selected source is monitored continuously.
-4. Adjust `Rec Level` to set the level used for recording and live input displays.
-5. Press `Record` to start recording, then `Stop` to return to live monitoring.
-6. Use `Play`, the playback seek bar, or `Save WAV` after recording.
+2. When using `Microphone`, select an input device from `Device`.
+3. Adjust `Rec Level` for the recorded signal and live input displays.
+4. Select `Spectrogram`, `Spectrum Analyzer (Mono)`, or `Spectrum Analyzer (Stereo)` from `Display`.
+5. Press `Record` to start recording and `Stop` to return to live monitoring.
+6. Use `Play`, the seek bar, and `Save WAV` after recording.
 
-Changing `Range`, `Scale`, `Max Hz`, `Display`, or `Analyzer` clears the current display and restarts drawing with the new settings. The waveform scrolls on the same time axis as the spectrogram. `Grid` toggles the frequency/time overlay, and `Grid Time/div` controls the horizontal time scale. The visible time width is `Grid Time/div x 10` and is shown as `Visible`.
+Changing `Scale`, `Max Hz`, or `Display` resets the display history. Changing `Range` updates subsequent spectrogram drawing without clearing the existing history, making its effect easier to compare. The waveform uses the same time axis as the spectrogram. `Grid Time/div` controls the horizontal time scale; the visible duration is ten divisions.
 
-`Rec Level` changes the level of the recorded signal and the live input displays. It is not saved as an app setting. `Gain` is an FFT/display multiplier for spectrogram and analyzer brightness. `Range` is spectrogram dynamic range in dB. `FPS` is the render update rate and controls movement smoothness.
+`Gain` controls FFT/display intensity and does not alter recorded audio. `Range` controls the spectrogram dynamic range in dB. `FPS` controls the rendering update rate.
 
-`VU` boosts only the level meter and spectrum analyzer display, making nominal levels touch 0 dB/red like an analog recorder. It does not change recorded audio.
+The Spectrogram-only controls are placed below the Display row and are disabled in either Spectrum Analyzer mode. The analyzer uses a fixed 20 kHz range and does not use the Spectrogram gain or maximum-frequency settings.
 
-`Analyzer` can be set to `Mono` or `Stereo L-R`. Stereo analyzer mode uses left/right split panels when stereo samples are available. Spectrogram and waveform display continue to use the mono display path.
+Use the `FPS` button for 15, 30, or 60 FPS presets. `Detailed settings...` opens a small live adjustment panel with a slider and numeric input from 12 to 60 FPS.
 
-Double-click a setting control to restore that control's default value, or press `Default Settings` to restore display, meter, grid, and window settings.
+`VU` boosts only the level-meter and spectrum-analyzer presentation so nominal levels approach 0 dB, similar to an analog recorder. It does not change captured or exported audio.
 
-In `System Output` mode, the app captures the Windows default playback device with WASAPI loopback. System Output recordings are exported as 48 kHz / 16-bit stereo WAV files. Microphone recordings currently use the mono capture path.
+`Spectrum Analyzer (Stereo)` displays separate left and right analyzer panels when stereo samples are available.
 
+Double-click a setting control to restore its default value, or press `Default Settings` to reset the display, meter, grid, and window settings.
 
+## Window Layout
+
+Right-click anywhere in the application background to show or hide:
+
+- Recording/playback controls
+- Settings
+- Main display
+- Waveform
+- Level meter
+
+The application does not display a traditional menu bar; layout and window commands are available from the right-click menu in both modes. Compact mode also hides the settings panel and removes the normal title bar. Drag an unused area of the application body to move the Compact window.
+
+Normal and Compact modes remember panel visibility independently. For example, Normal mode can show every panel while Compact mode shows only the level meter.
+
+The window and visible panels resize together. The main display receives additional vertical space when available, while utility panels such as the level meter retain a practical maximum height.
+
+## Audio Notes
+
+In `System Output` mode, the application captures the Windows default playback device using WASAPI loopback. These recordings are exported as 48 kHz / 16-bit stereo WAV files.
+
+Microphone recordings currently use the mono capture path.
 
 ## License
-Code in this repository is licensed under MIT.
+
+Code in this repository is licensed under the MIT License.

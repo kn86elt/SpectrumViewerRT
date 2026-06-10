@@ -25,6 +25,10 @@ public sealed class VfdStatusDisplay : FrameworkElement
         DependencyProperty.Register(nameof(GlowEnabled), typeof(bool), typeof(VfdStatusDisplay),
             new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty TextureEnabledProperty =
+        DependencyProperty.Register(nameof(TextureEnabled), typeof(bool), typeof(VfdStatusDisplay),
+            new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
+
     private static readonly IReadOnlyDictionary<char, string[]> Glyphs = new Dictionary<char, string[]>
     {
         [' '] = new[] { "00000", "00000", "00000", "00000", "00000", "00000", "00000" },
@@ -115,7 +119,15 @@ public sealed class VfdStatusDisplay : FrameworkElement
         set => SetValue(GlowEnabledProperty, value);
     }
 
-    protected override Size MeasureOverride(Size availableSize) => new(210, 62);
+    public bool TextureEnabled
+    {
+        get => (bool)GetValue(TextureEnabledProperty);
+        set => SetValue(TextureEnabledProperty, value);
+    }
+
+    protected override Size MeasureOverride(Size availableSize) => new(
+        double.IsInfinity(availableSize.Width) ? 210 : Math.Max(0, availableSize.Width),
+        double.IsInfinity(availableSize.Height) ? 62 : Math.Max(0, availableSize.Height));
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -125,13 +137,20 @@ public sealed class VfdStatusDisplay : FrameworkElement
             new Pen(new SolidColorBrush(Color.FromRgb(31, 57, 58)), 1),
             bounds, 3, 3);
 
-        const double horizontalPadding = 15;
-        const double verticalPadding = 11;
-        double textHeight = Math.Max(10, ActualHeight - verticalPadding * 2);
+        double horizontalPadding = Math.Min(15, ActualWidth * 0.07);
+        double verticalPadding = Math.Min(11, ActualHeight * 0.16);
+        double textHeight = Math.Max(1, ActualHeight - verticalPadding * 2);
         if (DisplayStyle == 1)
             DrawSegmentText(dc, TimeText, horizontalPadding, verticalPadding, textHeight);
         else
             DrawDotText(dc, TimeText, horizontalPadding, verticalPadding, textHeight);
+
+        if (TextureEnabled)
+        {
+            var texturePen = new Pen(new SolidColorBrush(Color.FromArgb(22, 0, 0, 0)), 1);
+            for (double scanY = 2.5; scanY < ActualHeight; scanY += 3)
+                dc.DrawLine(texturePen, new Point(1, scanY), new Point(Math.Max(1, ActualWidth - 1), scanY));
+        }
     }
 
     private void DrawSegmentText(DrawingContext dc, string text, double x, double y, double height)
@@ -155,7 +174,7 @@ public sealed class VfdStatusDisplay : FrameworkElement
 
             if (character == ':')
             {
-                DrawColon(dc, x, y, colonWidth, height, active);
+                DrawColon(dc, x, y, colonWidth, scale, active);
                 x += colonWidth + charGap;
                 continue;
             }
@@ -172,8 +191,11 @@ public sealed class VfdStatusDisplay : FrameworkElement
                 var end = new Point(x + line.X2 * scale, y + line.Y2 * scale);
                 Color color = lit ? active : inactive;
                 if (lit && GlowEnabled)
-                    dc.DrawLine(new Pen(new SolidColorBrush(WithAlpha(active, 52)), 3.2 * scale), start, end);
-                dc.DrawLine(new Pen(new SolidColorBrush(color), Math.Max(1, 1.35 * scale)), start, end);
+                {
+                    dc.DrawLine(CreateSegmentPen(WithAlpha(active, 28), 5.4 * scale), start, end);
+                    dc.DrawLine(CreateSegmentPen(WithAlpha(active, 78), 3.0 * scale), start, end);
+                }
+                dc.DrawLine(CreateSegmentPen(color, Math.Max(1, 1.35 * scale)), start, end);
             }
 
             x += charWidth + charGap;
@@ -186,7 +208,7 @@ public sealed class VfdStatusDisplay : FrameworkElement
         double availableWidth = Math.Max(1, ActualWidth - x * 2 - 8);
         double widthUnits = Math.Max(1, text.Length * 7.46 - 1.18);
         double dotSize = Math.Min(height / 10.2, availableWidth / (widthUnits + 4.0));
-        dotSize = Math.Max(0.8, dotSize);
+        dotSize = Math.Max(0.15, dotSize);
         double dotGap = dotSize * 0.32;
         double charWidth = dotSize * 5 + dotGap * 4;
         double charGap = dotSize * 1.18;
@@ -227,11 +249,11 @@ public sealed class VfdStatusDisplay : FrameworkElement
         }
     }
 
-    private void DrawColon(DrawingContext dc, double x, double y, double width, double height, Color color)
+    private void DrawColon(DrawingContext dc, double x, double y, double width, double scale, Color color)
     {
-        double dotSize = Math.Max(1.2, Math.Min(width, height * 0.12));
+        double dotSize = Math.Max(0.2, Math.Min(width, 1.7 * scale));
         double centerX = x + width / 2.0 - dotSize / 2.0;
-        foreach (double centerY in new[] { y + height * 0.18, y + height * 0.46 })
+        foreach (double centerY in new[] { y + 5.5 * scale, y + 14.5 * scale })
         {
             var rect = new Rect(centerX, centerY - dotSize / 2.0, dotSize, dotSize);
             if (GlowEnabled)
@@ -299,4 +321,10 @@ public sealed class VfdStatusDisplay : FrameworkElement
     }
 
     private static Color WithAlpha(Color color, byte alpha) => Color.FromArgb(alpha, color.R, color.G, color.B);
+
+    private static Pen CreateSegmentPen(Color color, double thickness) => new(new SolidColorBrush(color), thickness)
+    {
+        StartLineCap = PenLineCap.Round,
+        EndLineCap = PenLineCap.Round
+    };
 }

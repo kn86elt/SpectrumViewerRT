@@ -98,7 +98,9 @@ public sealed class VfdLevelMeter : FrameworkElement
         set => SetValue(TextureEnabledProperty, value);
     }
 
-    protected override Size MeasureOverride(Size availableSize) => new(360, 68);
+    protected override Size MeasureOverride(Size availableSize) => new(
+        double.IsInfinity(availableSize.Width) ? 360 : Math.Max(0, availableSize.Width),
+        double.IsInfinity(availableSize.Height) ? 68 : Math.Max(0, availableSize.Height));
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -106,19 +108,33 @@ public sealed class VfdLevelMeter : FrameworkElement
         dc.DrawRoundedRectangle(new SolidColorBrush(Color.FromRgb(4, 12, 14)), new Pen(new SolidColorBrush(Color.FromRgb(31, 57, 58)), 1), bounds, 3, 3);
         dc.DrawRectangle(new LinearGradientBrush(Color.FromArgb(80, 24, 90, 90), Colors.Transparent, 0), null, bounds);
 
+        const double designHeight = 68;
+        double contentScale = ActualHeight / designHeight;
+        if (contentScale <= 0 || ActualWidth <= 0)
+            return;
+
+        dc.PushClip(new RectangleGeometry(bounds));
+        dc.PushTransform(new ScaleTransform(contentScale, contentScale));
+        DrawMeterContent(dc, ActualWidth / contentScale, designHeight);
+        dc.Pop();
+        dc.Pop();
+        DrawTexture(dc, bounds);
+    }
+
+    private void DrawMeterContent(DrawingContext dc, double width, double height)
+    {
         double leftLabelWidth = 28;
         double top = 7;
         double scaleHeight = 19;
         double rowGap = 6;
-        double rowHeight = Math.Max(8, (ActualHeight - top - scaleHeight - rowGap) / 2.0);
+        double rowHeight = Math.Max(1, (height - top - scaleHeight - rowGap) / 2.0);
         double meterLeft = leftLabelWidth + 6;
-        double meterRight = Math.Max(meterLeft + 20, ActualWidth - 8);
+        double meterRight = Math.Max(meterLeft + 20, width - 8);
         double meterWidth = meterRight - meterLeft;
 
         DrawRow(dc, "L", LeftLevel, LeftPeakHold, meterLeft, top, meterWidth, rowHeight);
         DrawRow(dc, "R", RightLevel, RightPeakHold, meterLeft, top + rowHeight + rowGap, meterWidth, rowHeight);
-        DrawScale(dc, meterLeft, ActualHeight - scaleHeight + 3, meterWidth);
-        DrawTexture(dc, bounds);
+        DrawScale(dc, meterLeft, height - scaleHeight + 3, meterWidth);
     }
 
     private void DrawRow(DrawingContext dc, string label, double level, double peakHold, double x, double y, double width, double height)

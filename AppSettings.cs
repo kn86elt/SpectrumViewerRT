@@ -23,6 +23,11 @@ public sealed class AppSettings
     public bool ShowMainDisplay { get; set; } = Defaults.ShowMainDisplay;
     public bool ShowWaveform { get; set; } = Defaults.ShowWaveform;
     public bool ShowLevelMeter { get; set; } = Defaults.ShowLevelMeter;
+    public bool CompactShowTransportPanel { get; set; } = Defaults.CompactShowTransportPanel;
+    public bool CompactShowSettingsPanel { get; set; } = Defaults.CompactShowSettingsPanel;
+    public bool CompactShowMainDisplay { get; set; } = Defaults.CompactShowMainDisplay;
+    public bool CompactShowWaveform { get; set; } = Defaults.CompactShowWaveform;
+    public bool CompactShowLevelMeter { get; set; } = Defaults.CompactShowLevelMeter;
     public bool CompactMode { get; set; } = Defaults.CompactMode;
     public bool GridEnabled { get; set; } = Defaults.GridEnabled;
     public bool ShowUnlitSegments { get; set; } = Defaults.ShowUnlitSegments;
@@ -70,7 +75,7 @@ public sealed class AppSettings
         MeterColorIndex = Math.Clamp(MeterColorIndex, 0, 3);
         MeterStyleIndex = Math.Clamp(MeterStyleIndex, 0, 1);
         StatusDisplayStyleIndex = Math.Clamp(StatusDisplayStyleIndex, 0, 1);
-        DisplayModeIndex = Math.Clamp(DisplayModeIndex, 0, 1);
+        DisplayModeIndex = Math.Clamp(DisplayModeIndex, 0, 2);
         AnalyzerModeIndex = Math.Clamp(AnalyzerModeIndex, 0, 1);
         return this;
     }
@@ -105,6 +110,11 @@ public static class Defaults
     public const bool ShowMainDisplay = true;
     public const bool ShowWaveform = true;
     public const bool ShowLevelMeter = true;
+    public const bool CompactShowTransportPanel = true;
+    public const bool CompactShowSettingsPanel = false;
+    public const bool CompactShowMainDisplay = true;
+    public const bool CompactShowWaveform = true;
+    public const bool CompactShowLevelMeter = true;
     public const bool CompactMode = false;
     public const bool ShowUnlitSegments = true;
     public const bool GlowEnabled = true;

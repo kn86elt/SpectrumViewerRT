@@ -6,7 +6,8 @@
         xmlns:local="clr-namespace:SpectrumViewerRT"
         mc:Ignorable="d"
         Title="Spectrum Viewer RT" Height="720" Width="1180" MinHeight="600" MinWidth="980"
-        Background="#111418" PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
+        Background="#111418" PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
+        SizeChanged="Window_SizeChanged">
     <Window.Resources>
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="#E6EDF3"/>
@@ -235,7 +236,7 @@
         </Style>
     </Window.Resources>
 
-    <DockPanel x:Name="RootPanel" LastChildFill="True">
+    <DockPanel x:Name="RootPanel" LastChildFill="True" Background="Transparent">
         <DockPanel.ContextMenu>
             <ContextMenu>
                 <MenuItem Header="Show recording / playback" x:Name="ContextTransportMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
@@ -258,7 +259,8 @@
             </ContextMenu>
         </DockPanel.ContextMenu>
 
-        <Menu x:Name="MainMenu" DockPanel.Dock="Top" Height="26" Background="#151A20" Foreground="#E6EDF3">
+        <Menu x:Name="MainMenu" DockPanel.Dock="Top" Height="26" Visibility="Collapsed"
+              Background="#151A20" Foreground="#E6EDF3">
             <MenuItem Header="_View">
                 <MenuItem Header="Recording / playback" x:Name="TransportMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
                 <MenuItem Header="Settings" x:Name="SettingsMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
@@ -360,45 +362,7 @@
                     </StackPanel>
                 </Grid>
 
-                <StackPanel x:Name="SettingsPrimaryPanel" Grid.Row="2" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
-                    <TextBlock Text="Gain"/>
-                    <Slider x:Name="GainSlider" Width="118" Minimum="0.2" Maximum="8" Value="2.4" TickFrequency="0.2" Margin="8,0,6,0"
-                            ValueChanged="ControlValue_Changed"
-                            MouseDoubleClick="GainSlider_MouseDoubleClick"
-                            ToolTip="FFT input gain multiplier. It changes spectrogram brightness only, not audio volume."/>
-                    <TextBlock x:Name="GainValueText" Text="x2.4" MinWidth="36" Foreground="#9FB0C1" Margin="0,0,14,0"/>
-                    <TextBlock Text="Range"/>
-                    <Slider x:Name="RangeSlider" Width="130" Minimum="45" Maximum="120" Value="85" TickFrequency="5" Margin="8,0,18,0"
-                            ValueChanged="DisplaySetting_Changed"
-                            MouseDoubleClick="RangeSlider_MouseDoubleClick"
-                            ToolTip="Spectrogram dynamic range in dB. Lower values make quiet details brighter; higher values preserve more level contrast."/>
-                    <TextBlock x:Name="RangeValueText" Text="85 dB" MinWidth="42" Foreground="#9FB0C1" Margin="-12,0,14,0"/>
-                    <TextBlock Text="Scale"/>
-                    <ComboBox x:Name="ScaleCombo" Width="90" MinWidth="90" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="ScaleCombo_MouseDoubleClick"/>
-                    <TextBlock Text="FPS"/>
-                    <Slider x:Name="FpsSlider" Width="100" Minimum="12" Maximum="60" Value="60" TickFrequency="4" Margin="8,0,6,0"
-                            ValueChanged="ControlValue_Changed"
-                            MouseDoubleClick="FpsSlider_MouseDoubleClick"
-                            ToolTip="Render update rate. Higher FPS makes movement smoother but does not change the time scale."/>
-                    <TextBlock x:Name="FpsValueText" Text="60 fps" MinWidth="48" Foreground="#9FB0C1" Margin="0,0,14,0"/>
-                </StackPanel>
-
-                <StackPanel x:Name="SettingsSecondaryPanel" Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
-                    <TextBlock Text="Max Hz"/>
-                    <ComboBox x:Name="MaxFrequencyCombo" Width="100" MinWidth="100" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="MaxFrequencyCombo_MouseDoubleClick"/>
-                    <CheckBox x:Name="GridCheck" Content="Grid" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
-                              Margin="0,0,18,0" Checked="GridSetting_Changed" Unchecked="GridSetting_Changed"/>
-                    <TextBlock Text="Grid Time/div"/>
-                    <Slider x:Name="TimeDivisionSlider" Width="150" Minimum="0.25" Maximum="5" Value="1" TickFrequency="0.25"
-                            Margin="8,0,8,0" ValueChanged="GridSetting_Changed"
-                            MouseDoubleClick="TimeDivisionSlider_MouseDoubleClick"
-                            ToolTip="Seconds per horizontal division. This controls the time scale of the spectrogram and waveform."/>
-                    <TextBlock x:Name="TimeDivisionText" Text="1.00 s"/>
-                    <TextBlock Text="Visible"/>
-                    <TextBlock x:Name="VisibleTimeText" Text="37.5 s" Foreground="#9FB0C1" Margin="8,0,0,0"/>
-                </StackPanel>
-
-                <DockPanel x:Name="SettingsDisplayPanel" Grid.Row="4" Grid.ColumnSpan="5" Margin="0,10,0,0" LastChildFill="True">
+                <DockPanel x:Name="SettingsDisplayPanel" Grid.Row="2" Grid.ColumnSpan="5" Margin="0,10,0,0" LastChildFill="True">
                     <Button x:Name="DefaultsButton" Content="Default Settings"
                             DockPanel.Dock="Right"
                             Click="DefaultsButton_Click"
@@ -406,9 +370,43 @@
                             ToolTip="Restore display, meter, grid, and window settings to defaults."/>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Display"/>
-                        <ComboBox x:Name="DisplayModeCombo" Width="132" MinWidth="132" Margin="8,0,14,0" SelectionChanged="DisplayModeCombo_SelectionChanged"/>
-                        <TextBlock Text="Analyzer"/>
-                        <ComboBox x:Name="AnalyzerModeCombo" Width="112" MinWidth="112" Margin="8,0,14,0" SelectionChanged="AnalyzerModeCombo_SelectionChanged"/>
+                        <ComboBox x:Name="DisplayModeCombo" Width="210" MinWidth="210" Margin="8,0,14,0" SelectionChanged="DisplayModeCombo_SelectionChanged"/>
+                        <Button x:Name="FpsButton" Content="FPS: 60" MinWidth="78" Height="32" Margin="0,0,14,0"
+                                Click="FpsButton_Click"
+                                ToolTip="Choose a render-rate preset or open detailed FPS adjustment.">
+                            <Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="15 FPS" Tag="15" Click="FpsPresetMenuItem_Click"/>
+                                    <MenuItem Header="30 FPS" Tag="30" Click="FpsPresetMenuItem_Click"/>
+                                    <MenuItem Header="60 FPS" Tag="60" Click="FpsPresetMenuItem_Click"/>
+                                    <Separator/>
+                                    <MenuItem Header="Detailed settings..." Click="FpsDetailsMenuItem_Click"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
+                        <Popup x:Name="FpsDetailPopup" PlacementTarget="{Binding ElementName=FpsButton}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                            <Border Background="#111820" BorderBrush="#5B748E" BorderThickness="1"
+                                    CornerRadius="3" Padding="12" Margin="0,4,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Render FPS" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Slider x:Name="FpsSlider" Width="180" Minimum="12" Maximum="60" Value="60"
+                                                TickFrequency="1" IsMoveToPointEnabled="True" Margin="0,0,10,0"
+                                                ValueChanged="ControlValue_Changed"
+                                                MouseDoubleClick="FpsSlider_MouseDoubleClick"
+                                                ToolTip="Render update rate. Higher FPS makes movement smoother but does not change the time scale."/>
+                                        <TextBox x:Name="FpsTextBox" Width="52" Height="28"
+                                                 Foreground="#E6EDF3" Background="#0A0F14"
+                                                 BorderBrush="#33414F" BorderThickness="1"
+                                                 TextAlignment="Right" VerticalContentAlignment="Center"
+                                                 Padding="4,0" LostFocus="FpsTextBox_LostFocus"
+                                                 KeyDown="FpsTextBox_KeyDown"/>
+                                    </StackPanel>
+                                    <TextBlock Text="12-60 FPS" Foreground="#7F91A3" Margin="0,6,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
                         <TextBlock Text="Color"/>
                         <ComboBox x:Name="MeterColorCombo" Width="96" MinWidth="96" Margin="8,0,14,0" SelectionChanged="MeterSetting_Changed"/>
                         <TextBlock Text="Meter"/>
@@ -428,10 +426,43 @@
                                   ToolTip="Overlays subtle VFD glass and scanline texture."/>
                     </StackPanel>
                 </DockPanel>
+
+                <StackPanel x:Name="SettingsPrimaryPanel" Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="Gain"/>
+                    <Slider x:Name="GainSlider" Width="118" Minimum="0.2" Maximum="8" Value="2.4" TickFrequency="0.2" Margin="8,0,6,0"
+                            ValueChanged="ControlValue_Changed"
+                            MouseDoubleClick="GainSlider_MouseDoubleClick"
+                            ToolTip="FFT input gain multiplier. It changes spectrogram brightness only, not audio volume."/>
+                    <TextBlock x:Name="GainValueText" Text="x2.4" MinWidth="36" Foreground="#9FB0C1" Margin="0,0,14,0"/>
+                    <TextBlock Text="Range"/>
+                    <Slider x:Name="RangeSlider" Width="130" Minimum="45" Maximum="120" Value="85" TickFrequency="5" Margin="8,0,18,0"
+                            ValueChanged="DisplaySetting_Changed"
+                            MouseDoubleClick="RangeSlider_MouseDoubleClick"
+                            ToolTip="Spectrogram dynamic range in dB. Lower values make quiet details brighter; higher values preserve more level contrast."/>
+                    <TextBlock x:Name="RangeValueText" Text="85 dB" MinWidth="42" Foreground="#9FB0C1" Margin="-12,0,14,0"/>
+                    <TextBlock Text="Scale"/>
+                    <ComboBox x:Name="ScaleCombo" Width="90" MinWidth="90" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="ScaleCombo_MouseDoubleClick"/>
+                </StackPanel>
+
+                <StackPanel x:Name="SettingsSecondaryPanel" Grid.Row="4" Grid.ColumnSpan="5" Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="Max Hz"/>
+                    <ComboBox x:Name="MaxFrequencyCombo" Width="100" MinWidth="100" Margin="8,0,18,0" SelectionChanged="DisplaySetting_Changed" MouseDoubleClick="MaxFrequencyCombo_MouseDoubleClick"/>
+                    <CheckBox x:Name="GridCheck" Content="Grid" IsChecked="True" Foreground="#E6EDF3" VerticalAlignment="Center"
+                              Margin="0,0,18,0" Checked="GridSetting_Changed" Unchecked="GridSetting_Changed"/>
+                    <TextBlock Text="Grid Time/div"/>
+                    <Slider x:Name="TimeDivisionSlider" Width="150" Minimum="0.25" Maximum="5" Value="1" TickFrequency="0.25"
+                            Margin="8,0,8,0" ValueChanged="GridSetting_Changed"
+                            MouseDoubleClick="TimeDivisionSlider_MouseDoubleClick"
+                            ToolTip="Seconds per horizontal division. This controls the time scale of the spectrogram and waveform."/>
+                    <TextBlock x:Name="TimeDivisionText" Text="1.00 s"/>
+                    <TextBlock Text="Visible"/>
+                    <TextBlock x:Name="VisibleTimeText" Text="37.5 s" Foreground="#9FB0C1" Margin="8,0,0,0"/>
+                </StackPanel>
+
             </Grid>
         </Border>
 
-        <Grid x:Name="MainContentGrid" Margin="14">
+        <Grid x:Name="MainContentGrid" Margin="14" Background="Transparent">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="24"/>
@@ -441,7 +472,8 @@
 
             <Border x:Name="MainDisplayPanel" BorderBrush="#2D3540" BorderThickness="1" Background="#07090C">
                 <Grid>
-                    <Image x:Name="SpectrogramImage" Stretch="Fill" SnapsToDevicePixels="True"/>
+                    <Image x:Name="SpectrogramImage" Stretch="Fill"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Canvas x:Name="SpectrogramGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
                     <local:SpectrumAnalyzerDisplay x:Name="SpectrumAnalyzer" Visibility="Collapsed"/>
                 </Grid>
@@ -453,20 +485,22 @@
 
             <Border x:Name="WaveformPanel" Grid.Row="2" Margin="0,12,0,0" BorderBrush="#2D3540" BorderThickness="1" Background="#07090C">
                 <Grid>
-                    <Image x:Name="WaveformImage" Stretch="Fill" SnapsToDevicePixels="True"/>
+                    <Image x:Name="WaveformImage" Stretch="Fill"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Canvas x:Name="WaveformGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
                     <TextBlock Text="Waveform" Foreground="#8DA0B3" Margin="10,8,0,0" VerticalAlignment="Top"/>
                 </Grid>
             </Border>
 
-            <Border x:Name="LevelMeterPanel" Grid.Row="3" Margin="0,12,0,0" Background="#1B2027" BorderBrush="#2D3540" BorderThickness="1" Padding="12">
+            <Border x:Name="LevelMeterPanel" Grid.Row="3" Margin="0,12,0,0" Background="#1B2027"
+                    BorderBrush="#2D3540" BorderThickness="1" Padding="12" ClipToBounds="True">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="LevelMeterColumn" Width="*"/>
                         <ColumnDefinition x:Name="VfdStatusColumn" Width="190"/>
                     </Grid.ColumnDefinitions>
-                    <local:VfdLevelMeter x:Name="LevelMeter" Height="68" VerticalAlignment="Center"/>
-                    <local:VfdStatusDisplay x:Name="VfdStatus" Grid.Column="1" Height="44" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <local:VfdLevelMeter x:Name="LevelMeter" VerticalAlignment="Stretch"/>
+                    <local:VfdStatusDisplay x:Name="VfdStatus" Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Stretch"/>
                 </Grid>
             </Border>
         </Grid>
