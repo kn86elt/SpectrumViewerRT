@@ -1840,10 +1840,51 @@ public partial class MainWindow : Window
         if (!_uiReady)
             return;
 
+        SyncMeterContextMenus();
         LevelMeter.ColorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
         LevelMeter.MeterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
         ApplyMeterVisualSettings();
         SaveSettings();
+    }
+
+    private void MeterColorContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        SetComboIndexFromMenuItem(MeterColorCombo, sender);
+    }
+
+    private void MeterStyleContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        SetComboIndexFromMenuItem(MeterStyleCombo, sender);
+    }
+
+    private void SetComboIndexFromMenuItem(ComboBox comboBox, object sender)
+    {
+        if (sender is not MenuItem { Tag: string tag } ||
+            !int.TryParse(tag, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index))
+            return;
+
+        if (comboBox.SelectedIndex == index)
+        {
+            SyncMeterContextMenus();
+            return;
+        }
+
+        comboBox.SelectedIndex = index;
+    }
+
+    private void SyncMeterContextMenus()
+    {
+        if (ContextColorCyanMenuItem == null)
+            return;
+
+        ContextColorCyanMenuItem.IsChecked = MeterColorCombo.SelectedIndex == 0;
+        ContextColorGreenMenuItem.IsChecked = MeterColorCombo.SelectedIndex == 1;
+        ContextColorAmberMenuItem.IsChecked = MeterColorCombo.SelectedIndex == 2;
+        ContextColorBlueMenuItem.IsChecked = MeterColorCombo.SelectedIndex == 3;
+        ContextMeterBlockMenuItem.IsChecked = MeterStyleCombo.SelectedIndex == 0;
+        ContextMeterFineLineMenuItem.IsChecked = MeterStyleCombo.SelectedIndex == 1;
+        ContextMeterDotBlockMenuItem.IsChecked = MeterStyleCombo.SelectedIndex == 2;
+        ContextMeterDotFineLineMenuItem.IsChecked = MeterStyleCombo.SelectedIndex == 3;
     }
 
     private void MeterVisualSetting_Changed(object sender, RoutedEventArgs e)
@@ -1860,6 +1901,7 @@ public partial class MainWindow : Window
         if (LevelMeter == null || SpectrumAnalyzer == null)
             return;
 
+        SyncMeterContextMenus();
         LevelMeter.ColorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
         LevelMeter.MeterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
         LevelMeter.ShowUnlitSegments = ShowUnlitCheck.IsChecked == true;
@@ -2202,6 +2244,84 @@ public partial class MainWindow : Window
         ContextDisplaySpectrogramMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 0;
         ContextDisplayAnalyzerMonoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 1;
         ContextDisplayAnalyzerStereoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 2;
+    }
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0)
+            return;
+
+        bool handled = true;
+        switch (e.Key)
+        {
+            case Key.D1:
+            case Key.NumPad1:
+                TogglePanel(TransportMenuItem);
+                break;
+            case Key.D2:
+            case Key.NumPad2:
+                TogglePanel(SettingsMenuItem);
+                break;
+            case Key.D3:
+            case Key.NumPad3:
+                TogglePanel(MainDisplayMenuItem);
+                break;
+            case Key.D4:
+            case Key.NumPad4:
+                TogglePanel(WaveformMenuItem);
+                break;
+            case Key.D5:
+            case Key.NumPad5:
+                TogglePanel(LevelMeterMenuItem);
+                break;
+            case Key.T:
+                ToggleCompactMode();
+                break;
+            case Key.D:
+                CycleComboBox(DisplayModeCombo);
+                break;
+            case Key.L:
+                SetStatusDisplayStyle(StatusSegmentMenuItem.IsChecked ? 0 : 1);
+                ApplyMeterVisualSettings();
+                SaveSettings();
+                break;
+            case Key.F:
+                CycleComboBox(MeterColorCombo);
+                break;
+            case Key.M:
+                CycleComboBox(MeterStyleCombo);
+                break;
+            default:
+                handled = false;
+                break;
+        }
+
+        e.Handled = handled;
+    }
+
+    private void TogglePanel(MenuItem menuItem)
+    {
+        menuItem.IsChecked = !menuItem.IsChecked;
+        CapturePanelState(CompactMenuItem.IsChecked);
+        ApplyWindowLayout();
+        SaveSettings();
+    }
+
+    private void ToggleCompactMode()
+    {
+        CapturePanelState(_lastLayoutCompact);
+        CompactMenuItem.IsChecked = !CompactMenuItem.IsChecked;
+        ApplyPanelState(CompactMenuItem.IsChecked ? _compactPanelState : _normalPanelState);
+        ApplyWindowLayout();
+        SaveSettings();
+    }
+
+    private static void CycleComboBox(ComboBox comboBox)
+    {
+        if (comboBox.Items.Count == 0)
+            return;
+
+        comboBox.SelectedIndex = (Math.Max(0, comboBox.SelectedIndex) + 1) % comboBox.Items.Count;
     }
 
     private void LayoutMenuItem_Click(object sender, RoutedEventArgs e)

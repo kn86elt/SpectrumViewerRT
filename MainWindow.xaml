@@ -7,6 +7,7 @@
         mc:Ignorable="d"
         Title="Spectrum Viewer RT" Height="720" Width="1180" MinHeight="600" MinWidth="980"
         Background="#111418" PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
+        PreviewKeyDown="Window_PreviewKeyDown"
         SizeChanged="Window_SizeChanged">
     <Window.Resources>
         <Style TargetType="TextBlock">
@@ -239,14 +240,14 @@
     <DockPanel x:Name="RootPanel" LastChildFill="True" Background="Transparent">
         <DockPanel.ContextMenu>
             <ContextMenu>
-                <MenuItem Header="Show recording / playback" x:Name="ContextTransportMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
-                <MenuItem Header="Show settings" x:Name="ContextSettingsMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
-                <MenuItem Header="Show main display" x:Name="ContextMainDisplayMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
-                <MenuItem Header="Show waveform" x:Name="ContextWaveformMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
-                <MenuItem Header="Show level meter" x:Name="ContextLevelMeterMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show recording / playback" InputGestureText="Ctrl+1" x:Name="ContextTransportMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show settings" InputGestureText="Ctrl+2" x:Name="ContextSettingsMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show main display" InputGestureText="Ctrl+3" x:Name="ContextMainDisplayMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show waveform" InputGestureText="Ctrl+4" x:Name="ContextWaveformMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Show level meter" InputGestureText="Ctrl+5" x:Name="ContextLevelMeterMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
                 <Separator/>
-                <MenuItem Header="Compact mode" x:Name="ContextCompactMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
-                <MenuItem Header="Display Mode">
+                <MenuItem Header="Compact mode" InputGestureText="Ctrl+T" x:Name="ContextCompactMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
+                <MenuItem Header="Display Mode" InputGestureText="Ctrl+D">
                     <MenuItem Header="Spectrogram" x:Name="ContextDisplaySpectrogramMenuItem"
                               IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
                     <MenuItem Header="Spectrum Analyzer (Mono)" x:Name="ContextDisplayAnalyzerMonoMenuItem"
@@ -254,9 +255,21 @@
                     <MenuItem Header="Spectrum Analyzer (Stereo)" x:Name="ContextDisplayAnalyzerStereoMenuItem"
                               IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
                 </MenuItem>
-                <MenuItem Header="LIVE TIME display">
+                <MenuItem Header="LIVE TIME display" InputGestureText="Ctrl+L">
                     <MenuItem Header="Dot matrix" x:Name="ContextStatusDotMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>
                     <MenuItem Header="16 segment" x:Name="ContextStatusSegmentMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>
+                </MenuItem>
+                <MenuItem Header="Color" InputGestureText="Ctrl+F">
+                    <MenuItem Header="Cyan" Tag="0" x:Name="ContextColorCyanMenuItem" IsCheckable="True" Click="MeterColorContextMenuItem_Click"/>
+                    <MenuItem Header="Green" Tag="1" x:Name="ContextColorGreenMenuItem" IsCheckable="True" Click="MeterColorContextMenuItem_Click"/>
+                    <MenuItem Header="Amber" Tag="2" x:Name="ContextColorAmberMenuItem" IsCheckable="True" Click="MeterColorContextMenuItem_Click"/>
+                    <MenuItem Header="Blue" Tag="3" x:Name="ContextColorBlueMenuItem" IsCheckable="True" Click="MeterColorContextMenuItem_Click"/>
+                </MenuItem>
+                <MenuItem Header="Meter" InputGestureText="Ctrl+M">
+                    <MenuItem Header="Block" Tag="0" x:Name="ContextMeterBlockMenuItem" IsCheckable="True" Click="MeterStyleContextMenuItem_Click"/>
+                    <MenuItem Header="Fine Lines" Tag="1" x:Name="ContextMeterFineLineMenuItem" IsCheckable="True" Click="MeterStyleContextMenuItem_Click"/>
+                    <MenuItem Header="Dot Matrix Block" Tag="2" x:Name="ContextMeterDotBlockMenuItem" IsCheckable="True" Click="MeterStyleContextMenuItem_Click"/>
+                    <MenuItem Header="Dot Matrix Fine Lines" Tag="3" x:Name="ContextMeterDotFineLineMenuItem" IsCheckable="True" Click="MeterStyleContextMenuItem_Click"/>
                 </MenuItem>
                 <MenuItem Header="Always on top" x:Name="ContextAlwaysOnTopMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
                 <Separator/>
