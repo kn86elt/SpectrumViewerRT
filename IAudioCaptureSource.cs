@@ -7,6 +7,7 @@ public interface IAudioCaptureSource : IDisposable
     event Action<double>? LevelAvailable;
     event Action<LevelMeterReading>? StereoLevelAvailable;
     event Action<string>? StatusAvailable;
+    event Action<string>? CaptureStopped;
     int SampleRate { get; }
     void Start();
     void Stop();

@@ -9,6 +9,7 @@ using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Input;
 using System.Windows.Controls.Primitives;
+using System.Windows.Interop;
 using System.Windows.Shell;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -24,6 +25,7 @@ public partial class MainWindow : Window
     private const int WaveformHeight = 140;
     private const int DisplaySampleRate = AudioCapture.DefaultSampleRate;
     private const double DefaultRecordGainDb = 0.0;
+    private const int WmDeviceChange = 0x0219;
 
     private readonly ConcurrentQueue<short[]> _pendingSamples = new();
     private sealed record StereoPacket(short[] Left, short[] Right);
@@ -35,6 +37,7 @@ public partial class MainWindow : Window
     private readonly List<short> _recordedStereoInterleaved = new();
     private readonly DispatcherTimer _renderTimer = new();
     private readonly DispatcherTimer _vfdDecayTimer = new();
+    private readonly DispatcherTimer _deviceRefreshTimer = new();
     private readonly WriteableBitmap _spectrogram;
     private readonly byte[] _pixels = new byte[ImageWidth * ImageHeight * 4];
     private readonly WriteableBitmap _waveform;
@@ -112,6 +115,7 @@ public partial class MainWindow : Window
     private PanelVisibilityState _normalPanelState = PanelVisibilityState.NormalDefault;
     private PanelVisibilityState _compactPanelState = PanelVisibilityState.CompactDefault;
     private double _preferredLayoutHeight = 720;
+    private HwndSource? _windowSource;
 
     private readonly record struct PanelVisibilityState(
         bool Transport,
@@ -168,6 +172,12 @@ public partial class MainWindow : Window
         _playbackPlayer.MediaFailed += (_, e) => FinishPlayback($"Playback failed: {e.ErrorException.Message}", completed: false);
         _vfdDecayTimer.Interval = TimeSpan.FromMilliseconds(33);
         _vfdDecayTimer.Tick += VfdDecayTimer_Tick;
+        _deviceRefreshTimer.Interval = TimeSpan.FromMilliseconds(400);
+        _deviceRefreshTimer.Tick += (_, _) =>
+        {
+            _deviceRefreshTimer.Stop();
+            RefreshDevices();
+        };
         RefreshDevices();
         ApplyDisplayMode();
         _uiReady = true;
@@ -218,6 +228,29 @@ public partial class MainWindow : Window
             RestartCaptureForSelectedSource();
     }
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        _windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+        _windowSource?.AddHook(WindowMessageHook);
+    }
+
+    private IntPtr WindowMessageHook(
+        IntPtr hwnd,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam,
+        ref bool handled)
+    {
+        if (message == WmDeviceChange)
+        {
+            _deviceRefreshTimer.Stop();
+            _deviceRefreshTimer.Start();
+        }
+
+        return IntPtr.Zero;
+    }
+
     private void StartButton_Click(object sender, RoutedEventArgs e) => BeginCapture(record: true, clearRecording: true);
 
     private void BeginCapture(bool record, bool clearRecording = true)
@@ -251,15 +284,46 @@ public partial class MainWindow : Window
             _isRecording = record;
             if (record && clearRecording)
                 _recordingStereo = SelectedMode == CaptureMode.SystemOutput;
-            _capture = CreateCaptureSource();
-            _capture.SamplesAvailable += Capture_SamplesAvailable;
-            _capture.StereoSamplesAvailable += Capture_StereoSamplesAvailable;
-            _capture.LevelAvailable += level => _peak = Math.Max(_peak * 0.92, ApplyLevelGain(level));
-            _capture.StereoLevelAvailable += Capture_StereoLevelAvailable;
-            _capture.StatusAvailable += message => Dispatcher.BeginInvoke(() => SetStatus(message));
+            var capture = CreateCaptureSource();
+            _capture = capture;
+            capture.SamplesAvailable += samples =>
+            {
+                if (ReferenceEquals(_capture, capture))
+                    Capture_SamplesAvailable(samples);
+            };
+            capture.StereoSamplesAvailable += (left, right) =>
+            {
+                if (ReferenceEquals(_capture, capture))
+                    Capture_StereoSamplesAvailable(left, right);
+            };
+            capture.LevelAvailable += level =>
+            {
+                if (ReferenceEquals(_capture, capture))
+                    _peak = Math.Max(_peak * 0.92, ApplyLevelGain(level));
+            };
+            capture.StereoLevelAvailable += level =>
+            {
+                if (ReferenceEquals(_capture, capture))
+                    Capture_StereoLevelAvailable(level);
+            };
+            capture.StatusAvailable += message => Dispatcher.BeginInvoke(() =>
+            {
+                if (ReferenceEquals(_capture, capture))
+                    SetStatus(message);
+            });
+            capture.CaptureStopped += message => Dispatcher.BeginInvoke(() =>
+            {
+                if (!ReferenceEquals(_capture, capture))
+                    return;
+
+                StopCapture();
+                SetStoppedState();
+                RefreshDevices();
+                SetStatus(message);
+            });
 
             _monitor = null;
-            _capture.Start();
+            capture.Start();
 
             _recordingStarted = DateTime.Now;
             _renderTimer.Interval = TimeSpan.FromSeconds(1.0 / Math.Max(1.0, FpsSlider.Value));
@@ -1204,16 +1268,25 @@ public partial class MainWindow : Window
 
         CompensateSystemVolumeCheck.Visibility = Visibility.Collapsed;
         CompensateSystemVolumeCheck.IsEnabled = false;
-        int? previousDeviceId = DeviceCombo.SelectedItem is AudioDevice previous ? previous.Id : null;
+        AudioDevice? previousDevice = DeviceCombo.SelectedItem as AudioDevice;
         var devices = AudioCapture.GetInputDevices();
         DeviceCombo.ItemsSource = devices;
         DeviceCombo.IsEnabled = devices.Count > 0;
         if (devices.Count > 0)
         {
-            int selectedIndex = previousDeviceId.HasValue
-                ? devices.ToList().FindIndex(device => device.Id == previousDeviceId.Value)
-                : -1;
-            DeviceCombo.SelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+            int selectedIndex = previousDevice == null
+                ? -1
+                : devices.ToList().FindIndex(device =>
+                    device.Id == previousDevice.Id &&
+                    string.Equals(device.Name, previousDevice.Name, StringComparison.Ordinal));
+            if (selectedIndex < 0 && previousDevice != null)
+            {
+                selectedIndex = devices.ToList().FindIndex(device =>
+                    string.Equals(device.Name, previousDevice.Name, StringComparison.Ordinal));
+            }
+            DeviceCombo.SelectedIndex = selectedIndex >= 0
+                ? selectedIndex
+                : previousDevice == null ? 0 : -1;
         }
         SetStatus(devices.Count > 0 ? $"{devices.Count} input device(s)" : "No input devices");
         }
@@ -1440,10 +1513,12 @@ public partial class MainWindow : Window
     private void StopCapture(bool triggerVfdDecay = true)
     {
         _renderTimer.Stop();
-        _capture?.Dispose();
+        var capture = _capture;
         _capture = null;
-        _monitor?.Dispose();
+        var monitor = _monitor;
         _monitor = null;
+        DisposeInBackground(capture);
+        DisposeInBackground(monitor);
         _isRecording = false;
         _currentLevel = default;
         _peakHoldLevel = default;
@@ -1451,6 +1526,24 @@ public partial class MainWindow : Window
         SetInputControlsEnabled(true);
         if (triggerVfdDecay && _uiReady)
             TriggerVfdFullScaleDecay();
+    }
+
+    private static void DisposeInBackground(IDisposable? disposable)
+    {
+        if (disposable == null)
+            return;
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                disposable.Dispose();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(ex);
+            }
+        });
     }
 
     private void StopLiveMonitor()
@@ -2715,6 +2808,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _deviceRefreshTimer.Stop();
+        _windowSource?.RemoveHook(WindowMessageHook);
+        _windowSource = null;
         StopPlayback(updateStatus: false, restartLive: false);
         StopCapture(triggerVfdDecay: false);
         CancelVfdDecay();

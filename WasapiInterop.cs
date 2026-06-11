@@ -11,6 +11,7 @@ internal static class WasapiInterop
     public const int AudioClientStreamFlagsEventCallback = 0x00040000;
     public const uint CoinitMultithreaded = 0x0;
     public const int RpcESChangedMode = unchecked((int)0x80010106);
+    public const int AudclntEDeviceInvalidated = unchecked((int)0x88890004);
 
     public static readonly Guid IAudioClientId = new("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2");
     public static readonly Guid IAudioCaptureClientId = new("C8ADBD64-E71E-48A0-A4DE-185C395CD317");
@@ -51,6 +52,13 @@ internal static class WasapiInterop
         public ushort Size;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PropertyKey
+    {
+        public Guid FormatId;
+        public uint PropertyId;
+    }
+
     [ComImport]
     [Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
     internal sealed class MMDeviceEnumeratorComObject
@@ -69,9 +77,31 @@ internal static class WasapiInterop
         [PreserveSig]
         int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
         [PreserveSig]
-        int RegisterEndpointNotificationCallback(IntPtr client);
+        int RegisterEndpointNotificationCallback(IMMNotificationClient client);
         [PreserveSig]
-        int UnregisterEndpointNotificationCallback(IntPtr client);
+        int UnregisterEndpointNotificationCallback(IMMNotificationClient client);
+    }
+
+    [ComVisible(true)]
+    [Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IMMNotificationClient
+    {
+        [PreserveSig]
+        int OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, uint newState);
+        [PreserveSig]
+        int OnDeviceAdded([MarshalAs(UnmanagedType.LPWStr)] string deviceId);
+        [PreserveSig]
+        int OnDeviceRemoved([MarshalAs(UnmanagedType.LPWStr)] string deviceId);
+        [PreserveSig]
+        int OnDefaultDeviceChanged(
+            EDataFlow flow,
+            ERole role,
+            [MarshalAs(UnmanagedType.LPWStr)] string? defaultDeviceId);
+        [PreserveSig]
+        int OnPropertyValueChanged(
+            [MarshalAs(UnmanagedType.LPWStr)] string deviceId,
+            PropertyKey propertyKey);
     }
 
     [ComImport]

@@ -6,15 +6,66 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
 {
     private sealed record PacketSamples(short[] Mono, short[] Left, short[] Right);
 
+    [ComVisible(true)]
+    [ClassInterface(ClassInterfaceType.None)]
+    private sealed class DeviceNotificationClient : WasapiInterop.IMMNotificationClient
+    {
+        private readonly string _deviceId;
+        private readonly Action<string> _requestStop;
+
+        public DeviceNotificationClient(string deviceId, Action<string> requestStop)
+        {
+            _deviceId = deviceId;
+            _requestStop = requestStop;
+        }
+
+        public int OnDeviceStateChanged(string deviceId, uint newState)
+        {
+            if (IsActiveDevice(deviceId) && (newState & WasapiInterop.DeviceStateActive) == 0)
+                _requestStop("WASAPI output device is no longer available");
+            return 0;
+        }
+
+        public int OnDeviceAdded(string deviceId) => 0;
+
+        public int OnDeviceRemoved(string deviceId)
+        {
+            if (IsActiveDevice(deviceId))
+                _requestStop("WASAPI output device was removed");
+            return 0;
+        }
+
+        public int OnDefaultDeviceChanged(
+            WasapiInterop.EDataFlow flow,
+            WasapiInterop.ERole role,
+            string? defaultDeviceId)
+        {
+            if ((flow == WasapiInterop.EDataFlow.Render || flow == WasapiInterop.EDataFlow.All) &&
+                role == WasapiInterop.ERole.Multimedia &&
+                !string.Equals(defaultDeviceId, _deviceId, StringComparison.OrdinalIgnoreCase))
+            {
+                _requestStop("Default Windows output device changed");
+            }
+            return 0;
+        }
+
+        public int OnPropertyValueChanged(string deviceId, WasapiInterop.PropertyKey propertyKey) => 0;
+
+        private bool IsActiveDevice(string deviceId) =>
+            string.Equals(deviceId, _deviceId, StringComparison.OrdinalIgnoreCase);
+    }
+
     private const int OutputSampleRate = AudioCapture.DefaultSampleRate;
     private volatile bool _running;
     private Thread? _thread;
+    private readonly AutoResetEvent _stopEvent = new(false);
     private double _resamplePosition;
     private double _lastMono;
     private double _lastLeft;
     private double _lastRight;
     private LevelMeterReading _lastLevel;
     private volatile bool _compensateOutputVolume;
+    private int _stopNotificationSent;
 
     public WasapiLoopbackCapture(bool compensateOutputVolume = false)
     {
@@ -32,6 +83,7 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
     public event Action<double>? LevelAvailable;
     public event Action<LevelMeterReading>? StereoLevelAvailable;
     public event Action<string>? StatusAvailable;
+    public event Action<string>? CaptureStopped;
     public int SampleRate => OutputSampleRate;
 
     public void Start()
@@ -39,6 +91,8 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         if (_running)
             return;
 
+        _stopEvent.Reset();
+        Interlocked.Exchange(ref _stopNotificationSent, 0);
         _running = true;
         _thread = new Thread(CaptureLoop)
         {
@@ -51,9 +105,21 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
     public void Stop()
     {
         _running = false;
-        if (_thread is { IsAlive: true })
-            _thread.Join(TimeSpan.FromSeconds(1));
+        _stopEvent.Set();
+        if (_thread is { IsAlive: true } thread && thread != Thread.CurrentThread)
+            thread.Join(TimeSpan.FromMilliseconds(250));
         _thread = null;
+    }
+
+    private void RequestStop(string message)
+    {
+        if (!_running)
+            return;
+
+        _running = false;
+        _stopEvent.Set();
+        StatusAvailable?.Invoke(message);
+        NotifyCaptureStopped(message);
     }
 
     private void CaptureLoop()
@@ -63,20 +129,29 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         object? enumeratorObject = null;
         object? deviceObject = null;
         object? endpointVolumeObject = null;
+        WasapiInterop.IMMDeviceEnumerator? enumerator = null;
+        WasapiInterop.IMMNotificationClient? notificationClient = null;
+        AutoResetEvent? audioReadyEvent = null;
         IntPtr formatPtr = IntPtr.Zero;
         bool comInitialized = false;
+        bool notificationRegistered = false;
+        bool audioClientStarted = false;
 
         try
         {
             int coInit = WasapiInterop.CoInitializeEx(IntPtr.Zero, WasapiInterop.CoinitMultithreaded);
-            comInitialized = coInit == 0;
+            comInitialized = coInit >= 0;
             if (coInit < 0 && coInit != WasapiInterop.RpcESChangedMode)
                 Marshal.ThrowExceptionForHR(coInit);
 
             enumeratorObject = new WasapiInterop.MMDeviceEnumeratorComObject();
-            var enumerator = (WasapiInterop.IMMDeviceEnumerator)enumeratorObject;
+            enumerator = (WasapiInterop.IMMDeviceEnumerator)enumeratorObject;
             ThrowIfFailed(enumerator.GetDefaultAudioEndpoint(WasapiInterop.EDataFlow.Render, WasapiInterop.ERole.Multimedia, out var device), "GetDefaultAudioEndpoint");
             deviceObject = device;
+            ThrowIfFailed(device.GetId(out string deviceId), "IMMDevice.GetId");
+            notificationClient = new DeviceNotificationClient(deviceId, RequestStop);
+            ThrowIfFailed(enumerator.RegisterEndpointNotificationCallback(notificationClient), "RegisterEndpointNotificationCallback");
+            notificationRegistered = true;
 
             var audioClientId = WasapiInterop.IAudioClientId;
             ThrowIfFailed(device.Activate(ref audioClientId, WasapiInterop.ClsctxAll, IntPtr.Zero, out audioClientObject), "IMMDevice.Activate");
@@ -100,28 +175,31 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
 
             var session = Guid.Empty;
             long bufferDuration = 1_000_000;
-            int flags = WasapiInterop.AudioClientStreamFlagsLoopback;
+            int flags = WasapiInterop.AudioClientStreamFlagsLoopback |
+                        WasapiInterop.AudioClientStreamFlagsEventCallback;
             ThrowIfFailed(audioClient.Initialize(WasapiInterop.AudioClientShareModeShared, flags, bufferDuration, 0, formatPtr, ref session), "IAudioClient.Initialize");
+            audioReadyEvent = new AutoResetEvent(false);
+            ThrowIfFailed(audioClient.SetEventHandle(audioReadyEvent.SafeWaitHandle.DangerousGetHandle()), "IAudioClient.SetEventHandle");
 
             var captureClientId = WasapiInterop.IAudioCaptureClientId;
             ThrowIfFailed(audioClient.GetService(ref captureClientId, out captureClientObject), "IAudioClient.GetService");
             var captureClient = (WasapiInterop.IAudioCaptureClient)captureClientObject;
 
             ThrowIfFailed(audioClient.Start(), "IAudioClient.Start");
+            audioClientStarted = true;
             StatusAvailable?.Invoke("WASAPI loopback started");
             try
             {
                 double outputVolumeGain = 1.0;
                 long nextVolumeRead = 0;
+                WaitHandle[] waitHandles = { audioReadyEvent, _stopEvent };
                 while (_running)
                 {
-                    ThrowIfFailed(captureClient.GetNextPacketSize(out var packetFrames), "IAudioCaptureClient.GetNextPacketSize");
-                    if (packetFrames == 0)
-                    {
-                        Thread.Sleep(8);
-                        continue;
-                    }
+                    int signaled = WaitHandle.WaitAny(waitHandles);
+                    if (signaled == 1 || !_running)
+                        break;
 
+                    ThrowIfFailed(captureClient.GetNextPacketSize(out var packetFrames), "IAudioCaptureClient.GetNextPacketSize");
                     while (packetFrames > 0 && _running)
                     {
                         long now = Environment.TickCount64;
@@ -163,8 +241,18 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
             }
             finally
             {
-                audioClient.Stop();
+                if (audioClientStarted)
+                    audioClient.Stop();
             }
+        }
+        catch (COMException ex) when (ex.HResult == WasapiInterop.AudclntEDeviceInvalidated)
+        {
+            SamplesAvailable?.Invoke(Array.Empty<short>());
+            LevelAvailable?.Invoke(0);
+            StereoLevelAvailable?.Invoke(default);
+            const string message = "WASAPI output device is no longer available";
+            StatusAvailable?.Invoke(message);
+            NotifyCaptureStopped(message);
         }
         catch (Exception ex)
         {
@@ -172,10 +260,15 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
             LevelAvailable?.Invoke(0);
             StereoLevelAvailable?.Invoke(default);
             StatusAvailable?.Invoke($"WASAPI error: {ex.Message}");
+            NotifyCaptureStopped($"WASAPI capture stopped: {ex.Message}");
             System.Diagnostics.Debug.WriteLine(ex);
         }
         finally
         {
+            _running = false;
+            if (notificationRegistered && enumerator != null && notificationClient != null)
+                enumerator.UnregisterEndpointNotificationCallback(notificationClient);
+            audioReadyEvent?.Dispose();
             if (formatPtr != IntPtr.Zero)
                 WasapiInterop.CoTaskMemFree(formatPtr);
             if (captureClientObject != null)
@@ -335,6 +428,12 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
     {
         if (result < 0)
             Marshal.ThrowExceptionForHR(result);
+    }
+
+    private void NotifyCaptureStopped(string message)
+    {
+        if (Interlocked.Exchange(ref _stopNotificationSent, 1) == 0)
+            CaptureStopped?.Invoke(message);
     }
 
     public void Dispose() => Stop();
