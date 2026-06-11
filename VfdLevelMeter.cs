@@ -6,6 +6,23 @@ namespace SpectrumViewerRT;
 
 public sealed class VfdLevelMeter : FrameworkElement
 {
+    private static readonly Point[] GlowOffsets =
+    {
+        new(-1, 0), new(1, 0), new(0, -1), new(0, 1), new(-1, -1), new(1, 1)
+    };
+    private static readonly Brush BackgroundBrush = VfdDrawingCache.Brush(Color.FromRgb(4, 12, 14));
+    private static readonly Pen BorderPen = VfdDrawingCache.Pen(Color.FromRgb(31, 57, 58), 1);
+    private static readonly Brush BackgroundGradient = CreateFrozenBrush(
+        new LinearGradientBrush(Color.FromArgb(80, 24, 90, 90), Colors.Transparent, 0));
+    private static readonly Brush HorizontalTextureBrush = VfdDrawingCache.HorizontalLineTexture(
+        Color.FromArgb(18, 190, 255, 235), 3, 1.5);
+    private static readonly Brush VerticalTextureBrush = VfdDrawingCache.VerticalLineTexture(
+        Color.FromArgb(10, 210, 255, 245), 11, 4.5);
+    private static readonly Brush TextureHighlightBrush = CreateFrozenBrush(new LinearGradientBrush(
+        Color.FromArgb(36, 255, 255, 255),
+        Color.FromArgb(0, 255, 255, 255),
+        new Point(0, 0),
+        new Point(0, 0.45)));
     public static readonly DependencyProperty LeftLevelProperty =
         DependencyProperty.Register(nameof(LeftLevel), typeof(double), typeof(VfdLevelMeter),
             new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -107,8 +124,8 @@ public sealed class VfdLevelMeter : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         var bounds = new Rect(0, 0, ActualWidth, ActualHeight);
-        dc.DrawRoundedRectangle(new SolidColorBrush(Color.FromRgb(4, 12, 14)), new Pen(new SolidColorBrush(Color.FromRgb(31, 57, 58)), 1), bounds, 3, 3);
-        dc.DrawRectangle(new LinearGradientBrush(Color.FromArgb(80, 24, 90, 90), Colors.Transparent, 0), null, bounds);
+        dc.DrawRoundedRectangle(BackgroundBrush, BorderPen, bounds, 3, 3);
+        dc.DrawRectangle(BackgroundGradient, null, bounds);
 
         const double designHeight = 68;
         double contentScale = ActualHeight / designHeight;
@@ -251,12 +268,12 @@ public sealed class VfdLevelMeter : FrameworkElement
         if (active && GlowEnabled)
         {
             dc.DrawRectangle(
-                new SolidColorBrush(WithAlpha(color, 60)),
+                VfdDrawingCache.Brush(WithAlpha(color, 60)),
                 null,
                 new Rect(x - pixelWidth, y, pixelWidth * 3, height));
         }
 
-        dc.DrawRectangle(new SolidColorBrush(color), null, new Rect(x, y, pixelWidth, height));
+        dc.DrawRectangle(VfdDrawingCache.Brush(color), null, new Rect(x, y, pixelWidth, height));
     }
 
     private void DrawDotMatrixColumn(
@@ -284,11 +301,11 @@ public sealed class VfdLevelMeter : FrameworkElement
 
         if (active && GlowEnabled)
         {
-            dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 42)), null, Inflate(rect, 2.4, 2.0), 2.2, 2.2);
-            dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 78)), null, Inflate(rect, 1.1, 0.9), 1.8, 1.8);
+            dc.DrawRoundedRectangle(VfdDrawingCache.Brush(WithAlpha(color, 42)), null, Inflate(rect, 2.4, 2.0), 2.2, 2.2);
+            dc.DrawRoundedRectangle(VfdDrawingCache.Brush(WithAlpha(color, 78)), null, Inflate(rect, 1.1, 0.9), 1.8, 1.8);
         }
 
-        dc.DrawRoundedRectangle(new SolidColorBrush(color), null, rect, 1, 1);
+        dc.DrawRoundedRectangle(VfdDrawingCache.Brush(color), null, rect, 1, 1);
     }
 
     private void DrawDotMatrixBlock(DrawingContext dc, Rect rect, Color color, bool active)
@@ -356,21 +373,11 @@ public sealed class VfdLevelMeter : FrameworkElement
         if (!TextureEnabled || bounds.Width <= 0 || bounds.Height <= 0)
             return;
 
-        var horizontalPen = new Pen(new SolidColorBrush(Color.FromArgb(18, 190, 255, 235)), 1);
-        for (double y = 1.5; y < bounds.Height; y += 3)
-            dc.DrawLine(horizontalPen, new Point(bounds.Left, y), new Point(bounds.Right, y));
-
-        var verticalPen = new Pen(new SolidColorBrush(Color.FromArgb(10, 210, 255, 245)), 1);
-        for (double x = 4.5; x < bounds.Width; x += 11)
-            dc.DrawLine(verticalPen, new Point(x, bounds.Top + 1), new Point(x, bounds.Bottom - 1));
-
-        dc.DrawRectangle(new LinearGradientBrush(
-            Color.FromArgb(36, 255, 255, 255),
-            Color.FromArgb(0, 255, 255, 255),
-            new Point(0, 0),
-            new Point(0, 0.45)), null, bounds);
-        dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(18, 0, 0, 0)), null, new Rect(bounds.Left, bounds.Top, bounds.Width, 1));
-        dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(24, 0, 0, 0)), null, new Rect(bounds.Left, bounds.Bottom - 1, bounds.Width, 1));
+        dc.DrawRectangle(HorizontalTextureBrush, null, bounds);
+        dc.DrawRectangle(VerticalTextureBrush, null, bounds);
+        dc.DrawRectangle(TextureHighlightBrush, null, bounds);
+        dc.DrawRectangle(VfdDrawingCache.Brush(Color.FromArgb(18, 0, 0, 0)), null, new Rect(bounds.Left, bounds.Top, bounds.Width, 1));
+        dc.DrawRectangle(VfdDrawingCache.Brush(Color.FromArgb(24, 0, 0, 0)), null, new Rect(bounds.Left, bounds.Bottom - 1, bounds.Width, 1));
     }
 
     private static double LevelToDb(double level)
@@ -388,7 +395,7 @@ public sealed class VfdLevelMeter : FrameworkElement
         if (GlowEnabled)
         {
             var glowText = CreateFormattedText(text, size, WithAlpha(color, 60));
-            foreach (var offset in new[] { new Point(-1, 0), new Point(1, 0), new Point(0, -1), new Point(0, 1), new Point(-1, -1), new Point(1, 1) })
+            foreach (var offset in GlowOffsets)
                 dc.DrawText(glowText, new Point(x + offset.X, y + offset.Y));
         }
 
@@ -402,6 +409,12 @@ public sealed class VfdLevelMeter : FrameworkElement
             FlowDirection.LeftToRight,
             new Typeface("Consolas"),
             size,
-            new SolidColorBrush(color),
+            VfdDrawingCache.Brush(color),
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
+
+    private static T CreateFrozenBrush<T>(T brush) where T : Brush
+    {
+        brush.Freeze();
+        return brush;
+    }
 }

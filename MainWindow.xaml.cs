@@ -24,13 +24,26 @@ public partial class MainWindow : Window
     private const int WaveformWidth = 1200;
     private const int WaveformHeight = 140;
     private const int DisplaySampleRate = AudioCapture.DefaultSampleRate;
+    private const int SpectrogramHopSamples = DisplaySampleRate / 50;
     private const double DefaultRecordGainDb = 0.0;
     private const int WmDeviceChange = 0x0219;
+    private static readonly double[] HannWindow = CreateHannWindow();
+    private static readonly (double Position, byte R, byte G, byte B)[] ColorStops =
+    {
+        (0.00, 1, 7, 28),
+        (0.16, 0, 26, 96),
+        (0.34, 0, 116, 206),
+        (0.52, 27, 191, 122),
+        (0.68, 246, 215, 70),
+        (0.82, 255, 125, 30),
+        (1.00, 244, 20, 28)
+    };
 
     private readonly ConcurrentQueue<short[]> _pendingSamples = new();
     private sealed record StereoPacket(short[] Left, short[] Right);
     private readonly ConcurrentQueue<StereoPacket> _pendingStereoSamples = new();
     private readonly List<short> _sampleWindow = new(FftSize * 2);
+    private readonly List<short> _spectrogramSamples = new(FftSize * 3);
     private readonly List<short> _leftSampleWindow = new(FftSize * 2);
     private readonly List<short> _rightSampleWindow = new(FftSize * 2);
     private readonly List<short> _recorded = new();
@@ -42,9 +55,16 @@ public partial class MainWindow : Window
     private readonly byte[] _pixels = new byte[ImageWidth * ImageHeight * 4];
     private readonly WriteableBitmap _waveform;
     private readonly byte[] _waveformPixels = new byte[WaveformWidth * WaveformHeight * 4];
+    private readonly double[] _fftReal = new double[FftSize];
+    private readonly double[] _fftImaginary = new double[FftSize];
+    private readonly int[] _spectrogramBins = new int[ImageHeight];
+    private readonly double[] _spectrogramBinFractions = new double[ImageHeight];
+    private byte[] _pendingSpectrogramIntensity = new byte[ImageHeight];
     private readonly List<short> _latestRenderSamples = new();
     private const double TimeDivisions = 10.0;
     private double _scrollColumnAccumulator;
+    private double _spectrogramColumnAccumulator;
+    private int _spectrogramSampleOffset;
     private double[] _analyzerLevels = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
     private double[] _analyzerHolds = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
     private DateTime[] _analyzerHoldUntil = new DateTime[Defaults.AnalyzerBandCount];
@@ -116,6 +136,8 @@ public partial class MainWindow : Window
     private PanelVisibilityState _compactPanelState = PanelVisibilityState.CompactDefault;
     private double _preferredLayoutHeight = 720;
     private HwndSource? _windowSource;
+    private int _cachedSpectrogramScaleIndex = int.MinValue;
+    private int _cachedSpectrogramMaxFrequencyIndex = int.MinValue;
 
     private readonly record struct PanelVisibilityState(
         bool Transport,
@@ -128,7 +150,17 @@ public partial class MainWindow : Window
         public static PanelVisibilityState CompactDefault => new(true, false, true, true, true);
     }
 
+    private readonly record struct SpectrogramSlice(byte[] Intensities, int Width);
+
     private static double[] CreateAnalyzerValues(int count) => Enumerable.Repeat(-90.0, count).ToArray();
+
+    private static double[] CreateHannWindow()
+    {
+        var window = new double[FftSize];
+        for (int i = 0; i < window.Length; i++)
+            window[i] = 0.5 - 0.5 * Math.Cos(2.0 * Math.PI * i / (window.Length - 1));
+        return window;
+    }
 
     public MainWindow()
     {
@@ -269,10 +301,14 @@ public partial class MainWindow : Window
                 UpdatePlaybackSliderBounds();
             }
             _sampleWindow.Clear();
+            _spectrogramSamples.Clear();
+            _spectrogramSampleOffset = 0;
             _leftSampleWindow.Clear();
             _rightSampleWindow.Clear();
             _latestRenderSamples.Clear();
             _scrollColumnAccumulator = 0;
+            _spectrogramColumnAccumulator = 0;
+            Array.Clear(_pendingSpectrogramIntensity);
             _peak = 0;
             _currentLevel = default;
             _peakHoldLevel = default;
@@ -705,6 +741,8 @@ public partial class MainWindow : Window
             if (_isRecording)
                 AddRecordedSamples(samples);
             _sampleWindow.AddRange(samples);
+            if (DisplayModeCombo.SelectedIndex == 0)
+                _spectrogramSamples.AddRange(samples);
             _latestRenderSamples.AddRange(samples);
         }
 
@@ -726,18 +764,24 @@ public partial class MainWindow : Window
         TrimSampleWindow(_leftSampleWindow);
         TrimSampleWindow(_rightSampleWindow);
 
-        if (appended > 0 && _sampleWindow.Count >= FftSize)
+        if (appended > 0)
         {
-            _scrollColumnAccumulator += PixelsPerSecond / Math.Max(1.0, FpsSlider.Value);
-            int columns = Math.Clamp((int)_scrollColumnAccumulator, 0, ImageWidth);
-            if (columns > 0)
+            if (DisplayModeCombo.SelectedIndex > 0)
             {
-                _scrollColumnAccumulator -= columns;
-                if (DisplayModeCombo.SelectedIndex > 0)
+                if (_sampleWindow.Count >= FftSize)
                     DrawSpectrumAnalyzerFrame();
-                else
-                    DrawSpectrumColumns(columns);
-                DrawWaveformColumns(columns);
+            }
+            else
+            {
+                DrawPendingSpectrogramFrames();
+            }
+
+            _scrollColumnAccumulator += PixelsPerSecond * appended / DisplaySampleRate;
+            int waveformColumns = Math.Clamp((int)_scrollColumnAccumulator, 0, WaveformWidth);
+            if (waveformColumns > 0)
+            {
+                _scrollColumnAccumulator -= waveformColumns;
+                DrawWaveformColumns(waveformColumns);
                 _latestRenderSamples.Clear();
             }
         }
@@ -755,17 +799,25 @@ public partial class MainWindow : Window
     {
         DateTime now = DateTime.Now;
         bool liveClock = _showLiveClock && _capture != null && !_isRecording && !_isPlayingBack;
+        string secondaryText;
+        string timeText;
         if (liveClock)
         {
-            VfdStatus.TimeText = now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
-            VfdStatus.SecondaryText = now.ToString("MM/dd ddd", CultureInfo.InvariantCulture).ToUpperInvariant();
-            return;
+            timeText = now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            secondaryText = now.ToString("MM/dd ddd", CultureInfo.InvariantCulture).ToUpperInvariant();
+        }
+        else
+        {
+            secondaryText = string.Empty;
+            timeText = _isPlayingBack
+                ? $"PLAY {(now - _playbackStarted):mm\\:ss}"
+                : $"{(_isRecording ? "REC" : "LIVE")} {(now - _recordingStarted):mm\\:ss}";
         }
 
-        VfdStatus.SecondaryText = string.Empty;
-        VfdStatus.TimeText = _isPlayingBack
-            ? $"PLAY {(now - _playbackStarted):mm\\:ss}"
-            : $"{(_isRecording ? "REC" : "LIVE")} {(now - _recordingStarted):mm\\:ss}";
+        if (!string.Equals(VfdStatus.TimeText, timeText, StringComparison.Ordinal))
+            VfdStatus.TimeText = timeText;
+        if (!string.Equals(VfdStatus.SecondaryText, secondaryText, StringComparison.Ordinal))
+            VfdStatus.SecondaryText = secondaryText;
     }
 
     private void VfdStatus_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -902,21 +954,42 @@ public partial class MainWindow : Window
         else
         {
             _lastDotMeterLeft = _lastDotMeterRight = _lastDotMeterLeftHold = _lastDotMeterRightHold = int.MinValue;
-            LevelMeter.LeftLevel = leftLevel;
-            LevelMeter.RightLevel = rightLevel;
-            LevelMeter.LeftPeakHold = leftHold;
-            LevelMeter.RightPeakHold = rightHold;
+            if (Math.Abs(LevelMeter.LeftLevel - leftLevel) > 0.0000001)
+                LevelMeter.LeftLevel = leftLevel;
+            if (Math.Abs(LevelMeter.RightLevel - rightLevel) > 0.0000001)
+                LevelMeter.RightLevel = rightLevel;
+            if (Math.Abs(LevelMeter.LeftPeakHold - leftHold) > 0.0000001)
+                LevelMeter.LeftPeakHold = leftHold;
+            if (Math.Abs(LevelMeter.RightPeakHold - rightHold) > 0.0000001)
+                LevelMeter.RightPeakHold = rightHold;
         }
-        LevelMeter.ColorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
-        LevelMeter.MeterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
-        LevelMeter.ShowUnlitSegments = ShowUnlitCheck.IsChecked == true;
-        LevelMeter.GlowEnabled = GlowCheck.IsChecked == true;
-        LevelMeter.TextureEnabled = TextureCheck.IsChecked == true;
-        VfdStatus.ColorTheme = LevelMeter.ColorTheme;
-        VfdStatus.ShowUnlitSegments = LevelMeter.ShowUnlitSegments;
-        VfdStatus.GlowEnabled = LevelMeter.GlowEnabled;
-        VfdStatus.TextureEnabled = LevelMeter.TextureEnabled;
-        VfdStatus.DisplayStyle = StatusSegmentMenuItem.IsChecked ? 1 : 0;
+        int colorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
+        int meterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
+        bool showUnlit = ShowUnlitCheck.IsChecked == true;
+        bool glow = GlowCheck.IsChecked == true;
+        bool texture = TextureCheck.IsChecked == true;
+        int displayStyle = StatusSegmentMenuItem.IsChecked ? 1 : 0;
+
+        if (LevelMeter.ColorTheme != colorTheme)
+            LevelMeter.ColorTheme = colorTheme;
+        if (LevelMeter.MeterStyle != meterStyle)
+            LevelMeter.MeterStyle = meterStyle;
+        if (LevelMeter.ShowUnlitSegments != showUnlit)
+            LevelMeter.ShowUnlitSegments = showUnlit;
+        if (LevelMeter.GlowEnabled != glow)
+            LevelMeter.GlowEnabled = glow;
+        if (LevelMeter.TextureEnabled != texture)
+            LevelMeter.TextureEnabled = texture;
+        if (VfdStatus.ColorTheme != colorTheme)
+            VfdStatus.ColorTheme = colorTheme;
+        if (VfdStatus.ShowUnlitSegments != showUnlit)
+            VfdStatus.ShowUnlitSegments = showUnlit;
+        if (VfdStatus.GlowEnabled != glow)
+            VfdStatus.GlowEnabled = glow;
+        if (VfdStatus.TextureEnabled != texture)
+            VfdStatus.TextureEnabled = texture;
+        if (VfdStatus.DisplayStyle != displayStyle)
+            VfdStatus.DisplayStyle = displayStyle;
     }
 
     private void UpdateQuantizedDotMeter(double left, double right, double leftHold, double rightHold)
@@ -995,16 +1068,12 @@ public partial class MainWindow : Window
 
     private void ComputeAnalyzerLevels(List<short> samples, double[] levels, double[] holds, DateTime[] holdUntil)
     {
-        var real = new double[FftSize];
-        var imaginary = new double[FftSize];
         int start = samples.Count - FftSize;
         for (int i = 0; i < FftSize; i++)
-        {
-            double hann = 0.5 - 0.5 * Math.Cos(2.0 * Math.PI * i / (FftSize - 1));
-            real[i] = samples[start + i] / 32768.0 * hann;
-        }
+            _fftReal[i] = samples[start + i] / 32768.0 * HannWindow[i];
+        Array.Clear(_fftImaginary);
 
-        Fft.Transform(real, imaginary);
+        Fft.Transform(_fftReal, _fftImaginary);
         var now = DateTime.Now;
         const double analyzerMaxFrequency = 20000.0;
         for (int band = 0; band < levels.Length; band++)
@@ -1023,7 +1092,7 @@ public partial class MainWindow : Window
             double peakMagnitude = 0;
             for (int bin = startBin; bin <= endBin; bin++)
             {
-                double binMagnitude = Magnitude(real, imaginary, bin);
+                double binMagnitude = Magnitude(_fftReal, _fftImaginary, bin);
                 sum += binMagnitude;
                 peakMagnitude = Math.Max(peakMagnitude, binMagnitude);
             }
@@ -1083,54 +1152,147 @@ public partial class MainWindow : Window
 
     private double VisibleSeconds => Math.Max(0.1, TimeDivisionSlider.Value * TimeDivisions);
 
-    private void DrawSpectrumColumns(int columns)
+    private void DrawPendingSpectrogramFrames()
     {
-        columns = Math.Clamp(columns, 1, ImageWidth);
+        var slices = new List<SpectrogramSlice>();
+        while (_spectrogramSamples.Count - _spectrogramSampleOffset >= FftSize)
+        {
+            byte[] intensities = ComputeSpectrogramIntensity(_spectrogramSamples, _spectrogramSampleOffset);
+            AccumulateSpectrogramSlice(intensities, slices);
+            _spectrogramSampleOffset += SpectrogramHopSamples;
+        }
+
+        if (_spectrogramSampleOffset > 0 &&
+            (_spectrogramSampleOffset >= FftSize ||
+             _spectrogramSampleOffset > _spectrogramSamples.Count / 2))
+        {
+            _spectrogramSamples.RemoveRange(0, _spectrogramSampleOffset);
+            _spectrogramSampleOffset = 0;
+        }
+
+        if (slices.Count > 0)
+            DrawSpectrumSlices(slices);
+    }
+
+    private byte[] ComputeSpectrogramIntensity(List<short> samples, int start)
+    {
+        double gain = GainSlider.Value;
+        for (int i = 0; i < FftSize; i++)
+            _fftReal[i] = samples[start + i] / 32768.0 * HannWindow[i] * gain;
+        Array.Clear(_fftImaginary);
+
+        Fft.Transform(_fftReal, _fftImaginary);
+        EnsureSpectrogramBinMap();
+        double range = RangeSlider.Value;
+        var intensities = new byte[ImageHeight];
+        for (int y = 0; y < ImageHeight; y++)
+        {
+            int bin = _spectrogramBins[y];
+            double fraction = _spectrogramBinFractions[y];
+            double low = Magnitude(_fftReal, _fftImaginary, bin);
+            double high = Magnitude(_fftReal, _fftImaginary, bin + 1);
+            double magnitude = (low + (high - low) * fraction) / (FftSize * 0.5);
+            double db = 20.0 * Math.Log10(magnitude + 0.0000000001);
+            double intensity = Math.Clamp((db + range) / range, 0, 1);
+            intensities[y] = (byte)Math.Round(Math.Pow(intensity, 0.72) * 255);
+        }
+
+        return intensities;
+    }
+
+    private void AccumulateSpectrogramSlice(
+        byte[] intensities,
+        List<SpectrogramSlice> slices)
+    {
+        for (int y = 0; y < ImageHeight; y++)
+            _pendingSpectrogramIntensity[y] = Math.Max(_pendingSpectrogramIntensity[y], intensities[y]);
+
+        _spectrogramColumnAccumulator +=
+            PixelsPerSecond * SpectrogramHopSamples / DisplaySampleRate;
+        int columns = Math.Min(ImageWidth, (int)_spectrogramColumnAccumulator);
+        if (columns <= 0)
+            return;
+
+        _spectrogramColumnAccumulator -= columns;
+        slices.Add(new SpectrogramSlice(_pendingSpectrogramIntensity, columns));
+        _pendingSpectrogramIntensity = new byte[ImageHeight];
+    }
+
+    private void DrawSpectrumSlices(List<SpectrogramSlice> slices)
+    {
+        int totalColumns = Math.Min(ImageWidth, slices.Sum(slice => slice.Width));
+        if (totalColumns <= 0)
+            return;
+
         int bytesPerPixel = 4;
         int rowBytes = ImageWidth * bytesPerPixel;
-        int shiftBytes = columns * bytesPerPixel;
+        int shiftBytes = totalColumns * bytesPerPixel;
         for (int y = 0; y < ImageHeight; y++)
         {
             int rowStart = y * rowBytes;
-            Buffer.BlockCopy(_pixels, rowStart + shiftBytes, _pixels, rowStart, rowBytes - shiftBytes);
+            if (totalColumns < ImageWidth)
+                Buffer.BlockCopy(_pixels, rowStart + shiftBytes, _pixels, rowStart, rowBytes - shiftBytes);
             Array.Clear(_pixels, rowStart + rowBytes - shiftBytes, shiftBytes);
         }
 
-        var real = new double[FftSize];
-        var imaginary = new double[FftSize];
-        int start = _sampleWindow.Count - FftSize;
-        for (int i = 0; i < FftSize; i++)
+        int x = ImageWidth - totalColumns;
+        int skippedColumns = Math.Max(0, slices.Sum(slice => slice.Width) - totalColumns);
+        foreach (var slice in slices)
         {
-            double hann = 0.5 - 0.5 * Math.Cos(2.0 * Math.PI * i / (FftSize - 1));
-            real[i] = _sampleWindow[start + i] / 32768.0 * hann * GainSlider.Value;
-        }
+            int sliceStart = Math.Min(slice.Width, skippedColumns);
+            skippedColumns -= sliceStart;
+            int width = slice.Width - sliceStart;
+            if (width <= 0)
+                continue;
 
-        Fft.Transform(real, imaginary);
-
-        for (int y = 0; y < ImageHeight; y++)
-        {
-            double frequency = FrequencyForRow(y);
-            double binPosition = Math.Clamp(frequency / DisplaySampleRate * FftSize, 1, FftSize / 2 - 2);
-            int bin = (int)binPosition;
-            double fraction = binPosition - bin;
-            double low = Magnitude(real, imaginary, bin);
-            double high = Magnitude(real, imaginary, bin + 1);
-            double magnitude = (low + (high - low) * fraction) / (FftSize * 0.5);
-            double db = 20.0 * Math.Log10(magnitude + 0.0000000001);
-            double intensity = Math.Clamp((db + RangeSlider.Value) / RangeSlider.Value, 0, 1);
-            intensity = Math.Pow(intensity, 0.72);
-            var color = ColorMap(intensity);
-            for (int x = ImageWidth - columns; x < ImageWidth; x++)
+            for (int y = 0; y < ImageHeight; y++)
             {
-                int index = (y * ImageWidth + x) * 4;
-                _pixels[index + 0] = color.B;
-                _pixels[index + 1] = color.G;
-                _pixels[index + 2] = color.R;
-                _pixels[index + 3] = 255;
+                var color = ColorMap(slice.Intensities[y] / 255.0);
+                for (int column = 0; column < width; column++)
+                {
+                    int index = (y * ImageWidth + x + column) * 4;
+                    _pixels[index + 0] = color.B;
+                    _pixels[index + 1] = color.G;
+                    _pixels[index + 2] = color.R;
+                    _pixels[index + 3] = 255;
+                }
             }
+
+            x += width;
         }
 
         _spectrogram.WritePixels(new Int32Rect(0, 0, ImageWidth, ImageHeight), _pixels, ImageWidth * 4, 0);
+    }
+
+    private void EnsureSpectrogramBinMap()
+    {
+        int scaleIndex = ScaleCombo.SelectedIndex;
+        int maxFrequencyIndex = MaxFrequencyCombo.SelectedIndex;
+        if (_cachedSpectrogramScaleIndex == scaleIndex &&
+            _cachedSpectrogramMaxFrequencyIndex == maxFrequencyIndex)
+        {
+            return;
+        }
+
+        bool logarithmic = scaleIndex == 1;
+        double maxFrequency = MaxFrequency;
+        for (int y = 0; y < ImageHeight; y++)
+        {
+            double normalized = 1.0 - y / (double)(ImageHeight - 1);
+            double frequency = logarithmic
+                ? 20.0 * Math.Pow(maxFrequency / 20.0, normalized)
+                : Math.Max(20.0, normalized * maxFrequency);
+            double binPosition = Math.Clamp(
+                frequency / DisplaySampleRate * FftSize,
+                1,
+                FftSize / 2 - 2);
+            int bin = (int)binPosition;
+            _spectrogramBins[y] = bin;
+            _spectrogramBinFractions[y] = binPosition - bin;
+        }
+
+        _cachedSpectrogramScaleIndex = scaleIndex;
+        _cachedSpectrogramMaxFrequencyIndex = maxFrequencyIndex;
     }
 
     private double FrequencyForRow(int y)
@@ -1174,21 +1336,30 @@ public partial class MainWindow : Window
 
         if (_latestRenderSamples.Count > 0)
         {
-            short min = short.MaxValue;
-            short max = short.MinValue;
-            for (int i = 0; i < _latestRenderSamples.Count; i++)
+            int sampleCount = _latestRenderSamples.Count;
+            int firstColumn = WaveformWidth - columns;
+            for (int column = 0; column < columns; column++)
             {
-                min = Math.Min(min, _latestRenderSamples[i]);
-                max = Math.Max(max, _latestRenderSamples[i]);
-            }
+                int sampleStart = column * sampleCount / columns;
+                int sampleEnd = (column + 1) * sampleCount / columns;
+                if (sampleEnd <= sampleStart)
+                    sampleEnd = Math.Min(sampleCount, sampleStart + 1);
 
-            int minY = SampleToWaveformY(min);
-            int maxY = SampleToWaveformY(max);
-            if (minY > maxY)
-                (minY, maxY) = (maxY, minY);
+                short min = short.MaxValue;
+                short max = short.MinValue;
+                for (int i = sampleStart; i < sampleEnd; i++)
+                {
+                    short sample = _latestRenderSamples[i];
+                    min = Math.Min(min, sample);
+                    max = Math.Max(max, sample);
+                }
 
-            for (int x = WaveformWidth - columns; x < WaveformWidth; x++)
-            {
+                int minY = SampleToWaveformY(min);
+                int maxY = SampleToWaveformY(max);
+                if (minY > maxY)
+                    (minY, maxY) = (maxY, minY);
+
+                int x = firstColumn + column;
                 for (int y = minY; y <= maxY; y++)
                     SetWaveformPixel(x, y, 90, 220, 255);
             }
@@ -1219,28 +1390,17 @@ public partial class MainWindow : Window
     private static Color ColorMap(double value)
     {
         value = Math.Clamp(value, 0, 1);
-        (double position, byte r, byte g, byte b)[] stops =
+        for (int i = 0; i < ColorStops.Length - 1; i++)
         {
-            (0.00, 1, 7, 28),
-            (0.16, 0, 26, 96),
-            (0.34, 0, 116, 206),
-            (0.52, 27, 191, 122),
-            (0.68, 246, 215, 70),
-            (0.82, 255, 125, 30),
-            (1.00, 244, 20, 28)
-        };
-
-        for (int i = 0; i < stops.Length - 1; i++)
-        {
-            var a = stops[i];
-            var b = stops[i + 1];
-            if (value <= b.position)
+            var a = ColorStops[i];
+            var b = ColorStops[i + 1];
+            if (value <= b.Position)
             {
-                double t = (value - a.position) / (b.position - a.position);
+                double t = (value - a.Position) / (b.Position - a.Position);
                 return Color.FromRgb(
-                    (byte)Math.Round(a.r + (b.r - a.r) * t),
-                    (byte)Math.Round(a.g + (b.g - a.g) * t),
-                    (byte)Math.Round(a.b + (b.b - a.b) * t));
+                    (byte)Math.Round(a.R + (b.R - a.R) * t),
+                    (byte)Math.Round(a.G + (b.G - a.G) * t),
+                    (byte)Math.Round(a.B + (b.B - a.B) * t));
             }
         }
 
@@ -1636,8 +1796,12 @@ public partial class MainWindow : Window
         ClearSpectrogram();
         ClearWaveform();
         _sampleWindow.Clear();
+        _spectrogramSamples.Clear();
+        _spectrogramSampleOffset = 0;
         _latestRenderSamples.Clear();
         _scrollColumnAccumulator = 0;
+        _spectrogramColumnAccumulator = 0;
+        Array.Clear(_pendingSpectrogramIntensity);
         _currentLevel = default;
         _peakHoldLevel = default;
         Array.Fill(_analyzerLevels, -90.0);

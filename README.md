@@ -24,6 +24,7 @@ Display audio playing through Windows or sound received from a connected microph
 - Mono and stereo spectrum analyzers for viewing frequency balance
 - A waveform and left/right level meter
 - A LIVE elapsed-time display that can also show the current clock
+- Automatic refresh of the input-device list when audio devices are connected or disconnected
 
 This makes it easy to enjoy the movement of music, compare the left and right channels, and check input levels.
 
@@ -85,7 +86,24 @@ The application is not digitally signed, so Windows may display a security warni
 
 Right-click inside the application to change visible panels, enter Compact mode, select a display mode, or keep the window always on top.
 
+The right-click menu also provides direct selection of the VFD color and meter style.
+
 Click the LIVE TIME display beside the level meter to switch between elapsed time and the current clock. In Compact mode, you can also drag this display to move the window.
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+1` | Show or hide recording / playback controls |
+| `Ctrl+2` | Show or hide settings |
+| `Ctrl+3` | Show or hide the main display |
+| `Ctrl+4` | Show or hide the waveform |
+| `Ctrl+5` | Show or hide the level meter |
+| `Ctrl+T` | Toggle Compact mode |
+| `Ctrl+D` | Cycle through Spectrogram, Analyzer Mono, and Analyzer Stereo |
+| `Ctrl+L` | Toggle the LIVE TIME display between Dot Matrix and 16-segment |
+| `Ctrl+F` | Cycle through Cyan, Green, Amber, and Blue |
+| `Ctrl+M` | Cycle through Block, Fine Lines, Dot Matrix Block, and Dot Matrix Fine Lines |
 
 ## Settings
 

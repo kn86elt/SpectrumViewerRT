@@ -6,6 +6,23 @@ namespace SpectrumViewerRT;
 
 public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 {
+    private static readonly double[] GridDbValues = { -60.0, -40.0, -20.0, 0.0, 12.0 };
+    private static readonly Point[] GlowOffsets =
+    {
+        new(-1, 0), new(1, 0), new(0, -1), new(0, 1), new(-1, -1), new(1, 1)
+    };
+    private static readonly Brush BackgroundBrush = VfdDrawingCache.Brush(Color.FromRgb(3, 8, 10));
+    private static readonly Brush BackgroundGradient = CreateFrozenBrush(
+        new LinearGradientBrush(Color.FromArgb(70, 20, 80, 80), Colors.Transparent, 90));
+    private static readonly Brush HorizontalTextureBrush = VfdDrawingCache.HorizontalLineTexture(
+        Color.FromArgb(16, 190, 255, 235), 3, 1.5);
+    private static readonly Brush VerticalTextureBrush = VfdDrawingCache.VerticalLineTexture(
+        Color.FromArgb(8, 210, 255, 245), 13, 4.5);
+    private static readonly Brush TextureHighlightBrush = CreateFrozenBrush(new LinearGradientBrush(
+        Color.FromArgb(30, 255, 255, 255),
+        Color.FromArgb(0, 255, 255, 255),
+        new Point(0, 0),
+        new Point(0, 0.38)));
     private double[] _levels = Array.Empty<double>();
     private double[] _holds = Array.Empty<double>();
     private double[] _rightLevels = Array.Empty<double>();
@@ -60,8 +77,8 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         var bounds = new Rect(0, 0, ActualWidth, ActualHeight);
-        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(3, 8, 10)), null, bounds);
-        dc.DrawRectangle(new LinearGradientBrush(Color.FromArgb(70, 20, 80, 80), Colors.Transparent, 90), null, bounds);
+        dc.DrawRectangle(BackgroundBrush, null, bounds);
+        dc.DrawRectangle(BackgroundGradient, null, bounds);
 
         if (_levels.Length == 0 || ActualWidth < 40 || ActualHeight < 40)
             return;
@@ -235,12 +252,12 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         if (active && GlowEnabled)
         {
             dc.DrawRectangle(
-                new SolidColorBrush(WithAlpha(color, 58)),
+                VfdDrawingCache.Brush(WithAlpha(color, 58)),
                 null,
                 new Rect(x, y - pixelHeight, width, pixelHeight * 3));
         }
 
-        dc.DrawRectangle(new SolidColorBrush(color), null, new Rect(x, y, width, pixelHeight));
+        dc.DrawRectangle(VfdDrawingCache.Brush(color), null, new Rect(x, y, width, pixelHeight));
     }
 
     private void DrawDotMatrixRow(
@@ -260,10 +277,10 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
     private void DrawDbGrid(DrawingContext dc, double labelX, double left, double top, double width, double height)
     {
-        foreach (double db in new[] { -60.0, -40.0, -20.0, 0.0, 12.0 })
+        foreach (double db in GridDbValues)
         {
             double y = top + (1.0 - DbToNormalized(db)) * height;
-            dc.DrawLine(new Pen(new SolidColorBrush(Color.FromRgb(38, 52, 62)), 1) { DashStyle = DashStyles.Dot }, new Point(left, y), new Point(left + width, y));
+            dc.DrawLine(VfdDrawingCache.Pen(Color.FromRgb(38, 52, 62), 1, dotted: true), new Point(left, y), new Point(left + width, y));
             DrawText(dc, db.ToString("0", CultureInfo.InvariantCulture), labelX, y - 7, 11, ActiveColor());
         }
     }
@@ -327,11 +344,11 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
         if (active && GlowEnabled)
         {
-            dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 36)), null, Inflate(rect, 3.0, 2.0), 2, 2);
-            dc.DrawRoundedRectangle(new SolidColorBrush(WithAlpha(color, 70)), null, Inflate(rect, 1.4, 0.9), 1.5, 1.5);
+            dc.DrawRoundedRectangle(VfdDrawingCache.Brush(WithAlpha(color, 36)), null, Inflate(rect, 3.0, 2.0), 2, 2);
+            dc.DrawRoundedRectangle(VfdDrawingCache.Brush(WithAlpha(color, 70)), null, Inflate(rect, 1.4, 0.9), 1.5, 1.5);
         }
 
-        dc.DrawRoundedRectangle(new SolidColorBrush(color), null, rect, 1, 1);
+        dc.DrawRoundedRectangle(VfdDrawingCache.Brush(color), null, rect, 1, 1);
     }
 
     private void DrawDotMatrixBlock(DrawingContext dc, Rect rect, Color color, bool active)
@@ -361,19 +378,9 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         if (!TextureEnabled || bounds.Width <= 0 || bounds.Height <= 0)
             return;
 
-        var horizontalPen = new Pen(new SolidColorBrush(Color.FromArgb(16, 190, 255, 235)), 1);
-        for (double y = 1.5; y < bounds.Height; y += 3)
-            dc.DrawLine(horizontalPen, new Point(bounds.Left, y), new Point(bounds.Right, y));
-
-        var verticalPen = new Pen(new SolidColorBrush(Color.FromArgb(8, 210, 255, 245)), 1);
-        for (double x = 4.5; x < bounds.Width; x += 13)
-            dc.DrawLine(verticalPen, new Point(x, bounds.Top), new Point(x, bounds.Bottom));
-
-        dc.DrawRectangle(new LinearGradientBrush(
-            Color.FromArgb(30, 255, 255, 255),
-            Color.FromArgb(0, 255, 255, 255),
-            new Point(0, 0),
-            new Point(0, 0.38)), null, bounds);
+        dc.DrawRectangle(HorizontalTextureBrush, null, bounds);
+        dc.DrawRectangle(VerticalTextureBrush, null, bounds);
+        dc.DrawRectangle(TextureHighlightBrush, null, bounds);
     }
 
     private void DrawText(DrawingContext dc, string text, double x, double y, double size, Color color)
@@ -383,7 +390,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         if (GlowEnabled)
         {
             var glowText = CreateFormattedText(text, size, WithAlpha(color, 60));
-            foreach (var offset in new[] { new Point(-1, 0), new Point(1, 0), new Point(0, -1), new Point(0, 1), new Point(-1, -1), new Point(1, 1) })
+            foreach (var offset in GlowOffsets)
                 dc.DrawText(glowText, new Point(x + offset.X, y + offset.Y));
         }
 
@@ -398,7 +405,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         if (GlowEnabled)
         {
             var glowText = CreateFormattedText(text, size, WithAlpha(color, 60));
-            foreach (var offset in new[] { new Point(-1, 0), new Point(1, 0), new Point(0, -1), new Point(0, 1), new Point(-1, -1), new Point(1, 1) })
+            foreach (var offset in GlowOffsets)
                 dc.DrawText(glowText, new Point(x + offset.X, y + offset.Y));
         }
 
@@ -412,6 +419,12 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
             FlowDirection.LeftToRight,
             new Typeface("Consolas"),
             size,
-            new SolidColorBrush(color),
+            VfdDrawingCache.Brush(color),
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
+
+    private static T CreateFrozenBrush<T>(T brush) where T : Brush
+    {
+        brush.Freeze();
+        return brush;
+    }
 }
