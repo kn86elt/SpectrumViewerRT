@@ -6,6 +6,7 @@ namespace SpectrumViewerRT;
 
 public sealed class VfdLevelMeter : FrameworkElement
 {
+    private const double DefaultMeterWidth = 850;
     private static readonly Point[] GlowOffsets =
     {
         new(-1, 0), new(1, 0), new(0, -1), new(0, 1), new(-1, -1), new(1, 1)
@@ -61,6 +62,7 @@ public sealed class VfdLevelMeter : FrameworkElement
 
     private static readonly double[] DbMarks = { -60, -40, -30, -20, -10, -4, -2, 0, 2, 4, 6, 8, 10, 12, 14 };
     private double _verticalRenderScale = 1.0;
+    private double _labelScale = 1.0;
     private readonly DotMatrixVfdRasterizer _dotRasterizer = new();
 
     public double LeftLevel
@@ -133,6 +135,7 @@ public sealed class VfdLevelMeter : FrameworkElement
             return;
 
         _verticalRenderScale = contentScale;
+        _labelScale = Math.Clamp(ActualWidth / DefaultMeterWidth, 0.5, 2.2);
         bool dotMatrix = MeterStyle is 2 or 3;
         if (dotMatrix)
             _dotRasterizer.Begin(ActualWidth, ActualHeight, VisualTreeHelper.GetDpi(this));
@@ -148,6 +151,7 @@ public sealed class VfdLevelMeter : FrameworkElement
                 dc.DrawImage(image, bounds);
         }
         _verticalRenderScale = 1.0;
+        _labelScale = 1.0;
         DrawTexture(dc, bounds);
     }
 
@@ -169,7 +173,7 @@ public sealed class VfdLevelMeter : FrameworkElement
 
     private void DrawRow(DrawingContext dc, string label, double level, double peakHold, double x, double y, double width, double height)
     {
-        DrawText(dc, label, 10, y, 9, ActiveColor());
+        DrawText(dc, label, 10, y, 9 * _labelScale, ActiveColor());
 
         if (MeterStyle is 1 or 3)
         {
@@ -318,8 +322,9 @@ public sealed class VfdLevelMeter : FrameworkElement
 
     private void DrawScale(DrawingContext dc, double x, double y, double width)
     {
-        const double fontSize = 8;
+        double fontSize = 8 * _labelScale;
         DrawText(dc, "dB", x - 27, y, fontSize, ActiveColor());
+        double previousRight = double.NegativeInfinity;
         foreach (double mark in DbMarks)
         {
             double pos = x + DbToPosition(mark) * width;
@@ -327,7 +332,11 @@ public sealed class VfdLevelMeter : FrameworkElement
             string text = mark <= -60 ? "-inf" : mark.ToString("0", CultureInfo.InvariantCulture);
             var formatted = CreateFormattedText(text, fontSize, color);
             double textX = Math.Clamp(pos - formatted.Width / 2.0, x - 1, x + width - formatted.Width);
-            DrawText(dc, text, textX, y, fontSize, color);
+            if (textX < previousRight + Math.Max(1.5, fontSize * 0.2))
+                continue;
+
+            DrawFormattedText(dc, formatted, text, textX, y, fontSize, color);
+            previousRight = textX + formatted.Width;
         }
     }
 
@@ -391,6 +400,18 @@ public sealed class VfdLevelMeter : FrameworkElement
     private void DrawText(DrawingContext dc, string text, double x, double y, double size, Color color)
     {
         var formatted = CreateFormattedText(text, size, color);
+        DrawFormattedText(dc, formatted, text, x, y, size, color);
+    }
+
+    private void DrawFormattedText(
+        DrawingContext dc,
+        FormattedText formatted,
+        string text,
+        double x,
+        double y,
+        double size,
+        Color color)
+    {
 
         if (GlowEnabled)
         {

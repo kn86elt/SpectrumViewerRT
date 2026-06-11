@@ -125,6 +125,7 @@ public partial class MainWindow : Window
     private DateTime _vfdDecayStarted;
     private bool _vfdDecayActive;
     private bool _compactSizeApplied;
+    private bool _applyingCompactWindowSize;
     private double _normalWindowWidth = 1180;
     private double _normalWindowHeight = 720;
     private WindowState _normalWindowState = WindowState.Normal;
@@ -134,6 +135,8 @@ public partial class MainWindow : Window
     private double _compactMainDisplayHeight = 210;
     private PanelVisibilityState _normalPanelState = PanelVisibilityState.NormalDefault;
     private PanelVisibilityState _compactPanelState = PanelVisibilityState.CompactDefault;
+    private readonly Dictionary<int, Size> _compactWindowSizes = new();
+    private int? _activeCompactLayoutKey;
     private double _preferredLayoutHeight = 720;
     private HwndSource? _windowSource;
     private int _cachedSpectrogramScaleIndex = int.MinValue;
@@ -149,6 +152,12 @@ public partial class MainWindow : Window
         public static PanelVisibilityState NormalDefault => new(true, true, true, true, true);
         public static PanelVisibilityState CompactDefault => new(true, false, true, true, true);
     }
+
+    private int CompactLayoutKey =>
+        (TransportMenuItem.IsChecked ? 1 : 0) |
+        (MainDisplayMenuItem.IsChecked ? 2 : 0) |
+        (WaveformMenuItem.IsChecked ? 4 : 0) |
+        (LevelMeterMenuItem.IsChecked ? 8 : 0);
 
     private readonly record struct SpectrogramSlice(byte[] Intensities, int Width);
 
@@ -2586,6 +2595,20 @@ public partial class MainWindow : Window
         if (!_uiReady)
             return;
 
+        bool alwaysOnTopChanged =
+            sender == AlwaysOnTopMenuItem ||
+            sender == ContextAlwaysOnTopMenuItem;
+        if (alwaysOnTopChanged)
+        {
+            if (sender == ContextAlwaysOnTopMenuItem)
+                AlwaysOnTopMenuItem.IsChecked = ContextAlwaysOnTopMenuItem.IsChecked;
+
+            Topmost = AlwaysOnTopMenuItem.IsChecked;
+            SyncLayoutMenus();
+            SaveSettings();
+            return;
+        }
+
         bool modeChanged = sender == CompactMenuItem || sender == ContextCompactMenuItem;
         if (modeChanged)
             CapturePanelState(_lastLayoutCompact);
@@ -2602,8 +2625,6 @@ public partial class MainWindow : Window
             LevelMeterMenuItem.IsChecked = ContextLevelMeterMenuItem.IsChecked;
         else if (sender == ContextCompactMenuItem)
             CompactMenuItem.IsChecked = ContextCompactMenuItem.IsChecked;
-        else if (sender == ContextAlwaysOnTopMenuItem)
-            AlwaysOnTopMenuItem.IsChecked = ContextAlwaysOnTopMenuItem.IsChecked;
 
         if (modeChanged)
             ApplyPanelState(CompactMenuItem.IsChecked ? _compactPanelState : _normalPanelState);
@@ -2657,6 +2678,8 @@ public partial class MainWindow : Window
 
         _normalPanelState = PanelVisibilityState.NormalDefault;
         _compactPanelState = PanelVisibilityState.CompactDefault;
+        _compactWindowSizes.Clear();
+        _activeCompactLayoutKey = null;
         CompactMenuItem.IsChecked = false;
         ApplyPanelState(_normalPanelState);
         AlwaysOnTopMenuItem.IsChecked = false;
@@ -2747,17 +2770,6 @@ public partial class MainWindow : Window
             ? Math.Max(120, compactWindowHeight)
             : Math.Max(320, 720 - oldTopHeight + newTopHeight);
         ApplyResponsivePanelSizing();
-
-        if (_layoutInitialized && !compactChanged && WindowState == WindowState.Normal)
-        {
-            double heightDelta =
-                newTopHeight - oldTopHeight +
-                newMainHeight - oldMainHeight +
-                newTimeAxisHeight - oldTimeAxisHeight +
-                newWaveformHeight - oldWaveformHeight +
-                newLevelMeterHeight - oldLevelMeterHeight;
-            Height = Math.Max(MinHeight, Height + heightDelta);
-        }
 
         SyncLayoutMenus();
         Topmost = AlwaysOnTopMenuItem.IsChecked;
@@ -2861,6 +2873,18 @@ public partial class MainWindow : Window
 
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (_uiReady &&
+            CompactMenuItem.IsChecked == true &&
+            _compactSizeApplied &&
+            !_applyingCompactWindowSize &&
+            WindowState == WindowState.Normal &&
+            _activeCompactLayoutKey.HasValue)
+        {
+            _compactWindowSizes[_activeCompactLayoutKey.Value] = new Size(
+                Math.Max(MinWidth, ActualWidth),
+                Math.Max(MinHeight, ActualHeight));
+        }
+
         if (_uiReady)
             ApplyResponsivePanelSizing();
     }
@@ -2952,22 +2976,82 @@ public partial class MainWindow : Window
                 _normalWindowHeight = WindowState == WindowState.Normal ? Height : RestoreBounds.Height;
             }
 
-            WindowState = WindowState.Normal;
-            MinWidth = 480;
-            MinHeight = 120;
-            Width = Math.Max(MinWidth, Math.Min(_normalWindowWidth, 760));
-            Height = Math.Max(MinHeight, compactWindowHeight);
-            _compactSizeApplied = true;
+            int layoutKey = CompactLayoutKey;
+            bool enteringCompact = !_compactSizeApplied;
+            bool layoutChanged = _activeCompactLayoutKey != layoutKey;
+            if (!enteringCompact && !layoutChanged)
+                return;
+
+            if (!enteringCompact &&
+                layoutChanged &&
+                _activeCompactLayoutKey.HasValue &&
+                WindowState == WindowState.Normal)
+            {
+                _compactWindowSizes[_activeCompactLayoutKey.Value] = new Size(
+                    Math.Max(480, ActualWidth),
+                    Math.Max(120, ActualHeight));
+            }
+
+            Size targetSize;
+            if (_compactWindowSizes.TryGetValue(layoutKey, out var savedSize))
+            {
+                targetSize = savedSize;
+            }
+            else if (enteringCompact)
+            {
+                targetSize = new Size(
+                    Math.Max(480, Math.Min(_normalWindowWidth, 760)),
+                    Math.Max(120, compactWindowHeight));
+            }
+            else
+            {
+                targetSize = new Size(
+                    Math.Max(MinWidth, ActualWidth > 0 ? ActualWidth : Width),
+                    Math.Max(MinHeight, ActualHeight > 0 ? ActualHeight : Height));
+                _compactWindowSizes[layoutKey] = targetSize;
+            }
+
+            _applyingCompactWindowSize = true;
+            try
+            {
+                WindowState = WindowState.Normal;
+                MinWidth = 480;
+                MinHeight = 120;
+                Width = Math.Max(MinWidth, targetSize.Width);
+                Height = Math.Max(MinHeight, targetSize.Height);
+                _activeCompactLayoutKey = layoutKey;
+                _compactSizeApplied = true;
+            }
+            finally
+            {
+                _applyingCompactWindowSize = false;
+            }
             return;
         }
 
         if (!_compactSizeApplied)
             return;
 
-        Width = Math.Max(MinWidth, _normalWindowWidth);
-        Height = Math.Max(MinHeight, _normalWindowHeight);
-        WindowState = _normalWindowState == WindowState.Minimized ? WindowState.Normal : _normalWindowState;
-        _compactSizeApplied = false;
+        if (_activeCompactLayoutKey.HasValue && WindowState == WindowState.Normal)
+        {
+            _compactWindowSizes[_activeCompactLayoutKey.Value] = new Size(
+                Math.Max(480, ActualWidth),
+                Math.Max(120, ActualHeight));
+        }
+
+        _applyingCompactWindowSize = true;
+        try
+        {
+            Width = Math.Max(MinWidth, _normalWindowWidth);
+            Height = Math.Max(MinHeight, _normalWindowHeight);
+            WindowState = _normalWindowState == WindowState.Minimized ? WindowState.Normal : _normalWindowState;
+            _activeCompactLayoutKey = null;
+            _compactSizeApplied = false;
+        }
+        finally
+        {
+            _applyingCompactWindowSize = false;
+        }
     }
 
     protected override void OnClosed(EventArgs e)

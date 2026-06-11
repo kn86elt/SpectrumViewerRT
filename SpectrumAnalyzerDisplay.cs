@@ -6,6 +6,8 @@ namespace SpectrumViewerRT;
 
 public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 {
+    private const double DefaultMonoWidth = 1120;
+    private const double DefaultPanelHeight = 240;
     private static readonly double[] GridDbValues = { -60.0, -40.0, -20.0, 0.0, 12.0 };
     private static readonly Point[] GlowOffsets =
     {
@@ -115,16 +117,24 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
     private void DrawAnalyzerPanel(DrawingContext dc, double[] levels, double[] holds, Rect bounds, string label)
     {
-        double left = bounds.Left + 44;
-        double right = bounds.Right - 14;
-        double top = string.IsNullOrEmpty(label) ? 16 : 30;
-        double bottom = bounds.Bottom - 30;
+        double labelScale = CalculateLabelScale(bounds);
+        double gridFontSize = 11 * labelScale;
+        double frequencyFontSize = 11 * labelScale;
+        double channelFontSize = 14 * labelScale;
+        double leftLabelWidth = Math.Max(30, 44 * labelScale);
+        double bottomLabelHeight = Math.Max(20, 30 * labelScale);
+        double left = bounds.Left + leftLabelWidth;
+        double right = bounds.Right - Math.Max(8, 14 * labelScale);
+        double top = string.IsNullOrEmpty(label)
+            ? Math.Max(10, 16 * labelScale)
+            : Math.Max(22, 30 * labelScale);
+        double bottom = bounds.Bottom - bottomLabelHeight;
         double width = Math.Max(1, right - left);
         double height = Math.Max(1, bottom - top);
 
-        DrawDbGrid(dc, bounds.Left + 8, left, top, width, height);
+        DrawDbGrid(dc, bounds.Left + 5, left, top, width, height, gridFontSize);
         if (!string.IsNullOrEmpty(label))
-            DrawTextCentered(dc, label, bounds.Left + bounds.Width / 2.0, 5, 14, ActiveColor());
+            DrawTextCentered(dc, label, bounds.Left + bounds.Width / 2.0, 4, channelFontSize, ActiveColor());
 
         int bands = levels.Length;
         double gap = bands <= 1
@@ -138,7 +148,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         if (MeterStyle is 1 or 3)
         {
             DrawFineLineAnalyzer(dc, levels, holds, left, top, bottom, bandWidth, gap);
-            DrawFrequencyLabels(dc, left, bottom + 7, usedWidth);
+            DrawFrequencyLabels(dc, left, bottom + Math.Max(3, 7 * labelScale), usedWidth, frequencyFontSize);
             return;
         }
 
@@ -171,7 +181,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
             }
         }
 
-        DrawFrequencyLabels(dc, left, bottom + 7, usedWidth);
+        DrawFrequencyLabels(dc, left, bottom + Math.Max(3, 7 * labelScale), usedWidth, frequencyFontSize);
     }
 
     private void DrawFineLineAnalyzer(
@@ -275,38 +285,69 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
             active && GlowEnabled);
     }
 
-    private void DrawDbGrid(DrawingContext dc, double labelX, double left, double top, double width, double height)
+    private void DrawDbGrid(
+        DrawingContext dc,
+        double labelX,
+        double left,
+        double top,
+        double width,
+        double height,
+        double fontSize)
     {
-        foreach (double db in GridDbValues)
+        double previousBottom = double.NegativeInfinity;
+        for (int index = GridDbValues.Length - 1; index >= 0; index--)
         {
+            double db = GridDbValues[index];
             double y = top + (1.0 - DbToNormalized(db)) * height;
             dc.DrawLine(VfdDrawingCache.Pen(Color.FromRgb(38, 52, 62), 1, dotted: true), new Point(left, y), new Point(left + width, y));
-            DrawText(dc, db.ToString("0", CultureInfo.InvariantCulture), labelX, y - 7, 11, ActiveColor());
+            string text = db.ToString("0", CultureInfo.InvariantCulture);
+            var formatted = CreateFormattedText(text, fontSize, ActiveColor());
+            double textY = y - formatted.Height / 2.0;
+            if (textY < previousBottom + 1)
+                continue;
+
+            DrawFormattedText(dc, formatted, text, labelX, textY, fontSize, ActiveColor());
+            previousBottom = textY + formatted.Height;
         }
     }
 
-    private void DrawFrequencyLabels(DrawingContext dc, double left, double y, double width)
+    private void DrawFrequencyLabels(DrawingContext dc, double left, double y, double width, double fontSize)
     {
-        (double Frequency, string Label)[] labels = width switch
+        (double Frequency, string Label)[] labels =
         {
-            < 160 => new[] { (50.0, "50"), (1000.0, "1k"), (20000.0, "20k") },
-            < 300 => new[] { (50.0, "50"), (200.0, "200"), (1000.0, "1k"), (5000.0, "5k"), (20000.0, "20k") },
-            _ => new[]
-            {
-                (50.0, "50"), (100.0, "100"), (200.0, "200"), (500.0, "500"),
-                (1000.0, "1k"), (2000.0, "2k"), (5000.0, "5k"), (10000.0, "10k"), (20000.0, "20k")
-            }
+            (50.0, "50"), (100.0, "100"), (200.0, "200"), (500.0, "500"),
+            (1000.0, "1k"), (2000.0, "2k"), (5000.0, "5k"), (10000.0, "10k"), (20000.0, "20k")
         };
 
         const double minimumFrequency = 20.0;
         const double maximumFrequency = 20000.0;
         double logRange = Math.Log(maximumFrequency / minimumFrequency);
+        double previousRight = double.NegativeInfinity;
         foreach (var label in labels)
         {
             double position = Math.Log(label.Frequency / minimumFrequency) / logRange;
-            double x = left + position * width;
-            DrawTextCentered(dc, label.Label, x, y, 11, ActiveColor());
+            double centerX = left + position * width;
+            var formatted = CreateFormattedText(label.Label, fontSize, ActiveColor());
+            double textLeft = Math.Clamp(
+                centerX - formatted.Width / 2.0,
+                left,
+                Math.Max(left, left + width - formatted.Width));
+            double textRight = centerX + formatted.Width / 2.0;
+            textRight = textLeft + formatted.Width;
+            if (textLeft < previousRight + Math.Max(2, fontSize * 0.25))
+                continue;
+
+            DrawFormattedText(dc, formatted, label.Label, textLeft, y, fontSize, ActiveColor());
+            previousRight = textRight;
         }
+    }
+
+    private double CalculateLabelScale(Rect bounds)
+    {
+        double referenceWidth = _stereo ? DefaultMonoWidth / 2.0 : DefaultMonoWidth;
+        double widthScale = bounds.Width / referenceWidth;
+        double heightScale = bounds.Height / DefaultPanelHeight;
+        return Math.Clamp(Math.Min(widthScale, heightScale), 0.55, 2.2);
     }
 
     private static int DbToRows(double db, int rows) => Math.Clamp((int)Math.Round(DbToNormalized(db) * rows), 0, rows);
@@ -386,6 +427,18 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
     private void DrawText(DrawingContext dc, string text, double x, double y, double size, Color color)
     {
         var formatted = CreateFormattedText(text, size, color);
+        DrawFormattedText(dc, formatted, text, x, y, size, color);
+    }
+
+    private void DrawFormattedText(
+        DrawingContext dc,
+        FormattedText formatted,
+        string text,
+        double x,
+        double y,
+        double size,
+        Color color)
+    {
 
         if (GlowEnabled)
         {
@@ -401,15 +454,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
     {
         var formatted = CreateFormattedText(text, size, color);
         double x = centerX - formatted.Width / 2.0;
-
-        if (GlowEnabled)
-        {
-            var glowText = CreateFormattedText(text, size, WithAlpha(color, 60));
-            foreach (var offset in GlowOffsets)
-                dc.DrawText(glowText, new Point(x + offset.X, y + offset.Y));
-        }
-
-        dc.DrawText(formatted, new Point(x, y));
+        DrawFormattedText(dc, formatted, text, x, y, size, color);
     }
 
     private FormattedText CreateFormattedText(string text, double size, Color color) =>
