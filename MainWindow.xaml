@@ -250,10 +250,18 @@
                 <MenuItem Header="Display Mode" InputGestureText="Ctrl+D">
                     <MenuItem Header="Spectrogram" x:Name="ContextDisplaySpectrogramMenuItem"
                               IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
+                    <MenuItem Header="Spectrogram (Stereo)" x:Name="ContextDisplaySpectrogramStereoMenuItem"
+                              IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
                     <MenuItem Header="Spectrum Analyzer (Mono)" x:Name="ContextDisplayAnalyzerMonoMenuItem"
                               IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
                     <MenuItem Header="Spectrum Analyzer (Stereo)" x:Name="ContextDisplayAnalyzerStereoMenuItem"
                               IsCheckable="True" Click="DisplayModeContextMenuItem_Click"/>
+                </MenuItem>
+                <MenuItem Header="Stereo Split">
+                    <MenuItem Header="Left / Right" x:Name="ContextStereoSplitLeftRightMenuItem"
+                              IsCheckable="True" Click="StereoSplitContextMenuItem_Click"/>
+                    <MenuItem Header="Top / Bottom" x:Name="ContextStereoSplitTopBottomMenuItem"
+                              IsCheckable="True" Click="StereoSplitContextMenuItem_Click"/>
                 </MenuItem>
                 <MenuItem Header="LIVE TIME display" InputGestureText="Ctrl+L">
                     <MenuItem Header="Dot matrix" x:Name="ContextStatusDotMenuItem" IsCheckable="True" Click="StatusDisplayStyleMenuItem_Click"/>

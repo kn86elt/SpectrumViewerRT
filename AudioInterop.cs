@@ -5,6 +5,7 @@ namespace SpectrumViewerRT;
 internal static class AudioInterop
 {
     public const int CallbackFunction = 0x00030000;
+    public const int WaveFormatQuery = 0x00000001;
     public const int WaveMapper = -1;
     public const int MmWimData = 0x3C0;
     public const int WomDone = 0x3BD;
@@ -98,14 +99,18 @@ internal static class AudioInterop
     [DllImport("winmm.dll")]
     public static extern uint waveOutClose(IntPtr handle);
 
-    public static WaveFormatEx Pcm16Mono(int sampleRate) => new()
+    public static WaveFormatEx Pcm16Mono(int sampleRate) => Pcm16(sampleRate, 1);
+
+    public static WaveFormatEx Pcm16Stereo(int sampleRate) => Pcm16(sampleRate, 2);
+
+    private static WaveFormatEx Pcm16(int sampleRate, ushort channels) => new()
     {
         FormatTag = 1,
-        Channels = 1,
+        Channels = channels,
         SamplesPerSec = (uint)sampleRate,
         BitsPerSample = 16,
-        BlockAlign = 2,
-        AvgBytesPerSec = (uint)(sampleRate * 2),
+        BlockAlign = (ushort)(channels * 2),
+        AvgBytesPerSec = (uint)(sampleRate * channels * 2),
         Size = 0
     };
 }

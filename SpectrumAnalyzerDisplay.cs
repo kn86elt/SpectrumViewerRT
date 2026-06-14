@@ -39,6 +39,7 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
     public bool TextureEnabled { get; set; } = true;
     public double MaximumBandWidth { get; set; } = Defaults.MonoAnalyzerMaxBandWidth;
     public double MaximumBandGap { get; set; } = Defaults.MonoAnalyzerMaxBandGap;
+    public StereoSplitMode StereoSplitMode { get; set; }
 
     public void Update(double[] levels, double[] holds, int colorTheme, int meterStyle, bool showUnlitSegments, bool glowEnabled, bool textureEnabled)
     {
@@ -92,9 +93,18 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         if (_stereo && _rightLevels.Length > 0)
         {
             double gap = 24;
-            double panelWidth = Math.Max(1, (ActualWidth - gap) / 2.0);
-            DrawAnalyzerPanel(dc, _levels, _holds, new Rect(0, 0, panelWidth, ActualHeight), "L");
-            DrawAnalyzerPanel(dc, _rightLevels, _rightHolds, new Rect(panelWidth + gap, 0, panelWidth, ActualHeight), "R");
+            if (StereoSplitMode == StereoSplitMode.TopBottom)
+            {
+                double panelHeight = Math.Max(1, (ActualHeight - gap) / 2.0);
+                DrawAnalyzerPanel(dc, _levels, _holds, new Rect(0, 0, ActualWidth, panelHeight), "L");
+                DrawAnalyzerPanel(dc, _rightLevels, _rightHolds, new Rect(0, panelHeight + gap, ActualWidth, panelHeight), "R");
+            }
+            else
+            {
+                double panelWidth = Math.Max(1, (ActualWidth - gap) / 2.0);
+                DrawAnalyzerPanel(dc, _levels, _holds, new Rect(0, 0, panelWidth, ActualHeight), "L");
+                DrawAnalyzerPanel(dc, _rightLevels, _rightHolds, new Rect(panelWidth + gap, 0, panelWidth, ActualHeight), "R");
+            }
             DrawDotMatrixLayer(dc, bounds, dotMatrix);
             DrawTexture(dc, bounds);
             return;
@@ -125,16 +135,23 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
         double bottomLabelHeight = Math.Max(20, 30 * labelScale);
         double left = bounds.Left + leftLabelWidth;
         double right = bounds.Right - Math.Max(8, 14 * labelScale);
-        double top = string.IsNullOrEmpty(label)
+        double topMargin = string.IsNullOrEmpty(label)
             ? Math.Max(10, 16 * labelScale)
             : Math.Max(22, 30 * labelScale);
+        double top = bounds.Top + topMargin;
         double bottom = bounds.Bottom - bottomLabelHeight;
         double width = Math.Max(1, right - left);
         double height = Math.Max(1, bottom - top);
 
         DrawDbGrid(dc, bounds.Left + 5, left, top, width, height, gridFontSize);
         if (!string.IsNullOrEmpty(label))
-            DrawTextCentered(dc, label, bounds.Left + bounds.Width / 2.0, 4, channelFontSize, ActiveColor());
+            DrawTextCentered(
+                dc,
+                label,
+                bounds.Left + bounds.Width / 2.0,
+                bounds.Top + 4,
+                channelFontSize,
+                ActiveColor());
 
         int bands = levels.Length;
         double gap = bands <= 1
@@ -344,7 +361,9 @@ public sealed class SpectrumAnalyzerDisplay : FrameworkElement
 
     private double CalculateLabelScale(Rect bounds)
     {
-        double referenceWidth = _stereo ? DefaultMonoWidth / 2.0 : DefaultMonoWidth;
+        double referenceWidth = _stereo && StereoSplitMode == StereoSplitMode.LeftRight
+            ? DefaultMonoWidth / 2.0
+            : DefaultMonoWidth;
         double widthScale = bounds.Width / referenceWidth;
         double heightScale = bounds.Height / DefaultPanelHeight;
         return Math.Clamp(Math.Min(widthScale, heightScale), 0.55, 2.2);

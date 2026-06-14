@@ -22,6 +22,7 @@ public sealed class AudioCapture : IAudioCaptureSource
     public event Action<string>? CaptureStopped;
     public int SampleRateValue => DefaultSampleRate;
     int IAudioCaptureSource.SampleRate => DefaultSampleRate;
+    public bool IsStereo { get; private set; }
 
     private readonly int? _deviceId;
 
@@ -68,7 +69,8 @@ public sealed class AudioCapture : IAudioCaptureSource
                 throw new InvalidOperationException("The previous input device is still stopping.");
         }
 
-        var format = AudioInterop.Pcm16Mono(SampleRate);
+        var format = SelectFormat(deviceId);
+        IsStereo = format.Channels == 2;
         Interlocked.Exchange(ref _stopNotificationSent, 0);
         ThrowIfFailed(AudioInterop.waveInOpen(out _handle, deviceId, ref format, _callback, IntPtr.Zero, AudioInterop.CallbackFunction), "waveInOpen");
 
@@ -87,7 +89,8 @@ public sealed class AudioCapture : IAudioCaptureSource
             _running = false;
             throw;
         }
-        StatusAvailable?.Invoke($"waveIn started: {DefaultSampleRate} Hz, mono, 16 bit");
+        StatusAvailable?.Invoke(
+            $"waveIn started: {DefaultSampleRate} Hz, {(IsStereo ? "stereo" : "mono")}, 16 bit");
     }
 
     public void Start()
@@ -172,17 +175,9 @@ public sealed class AudioCapture : IAudioCaptureSource
 
             var bytes = new byte[byteCount];
             Marshal.Copy(header.Data, bytes, 0, byteCount);
-            var samples = new short[byteCount / 2];
-            Buffer.BlockCopy(bytes, 0, samples, 0, byteCount);
-
-            double peak = 0;
-            for (int i = 0; i < samples.Length; i++)
-                peak = Math.Max(peak, Math.Abs(samples[i] / 32768.0));
-
-            SamplesAvailable?.Invoke(samples);
-            StereoSamplesAvailable?.Invoke(samples, samples);
-            LevelAvailable?.Invoke(peak);
-            StereoLevelAvailable?.Invoke(LevelMeterReading.Mono(peak));
+            var interleaved = new short[byteCount / 2];
+            Buffer.BlockCopy(bytes, 0, interleaved, 0, byteCount);
+            PublishSamples(interleaved);
 
             IntPtr handle;
             lock (_gate)
@@ -219,4 +214,62 @@ public sealed class AudioCapture : IAudioCaptureSource
     }
 
     public void Dispose() => Stop();
+
+    private static AudioInterop.WaveFormatEx SelectFormat(int deviceId)
+    {
+        var stereo = AudioInterop.Pcm16Stereo(SampleRate);
+        if (AudioInterop.waveInOpen(
+                out _,
+                deviceId,
+                ref stereo,
+                null!,
+                IntPtr.Zero,
+                AudioInterop.WaveFormatQuery) == 0)
+        {
+            return stereo;
+        }
+
+        return AudioInterop.Pcm16Mono(SampleRate);
+    }
+
+    private void PublishSamples(short[] interleaved)
+    {
+        if (!IsStereo)
+        {
+            double peak = Peak(interleaved);
+            SamplesAvailable?.Invoke(interleaved);
+            StereoSamplesAvailable?.Invoke(interleaved, interleaved);
+            LevelAvailable?.Invoke(peak);
+            StereoLevelAvailable?.Invoke(LevelMeterReading.Mono(peak));
+            return;
+        }
+
+        int frameCount = interleaved.Length / 2;
+        var left = new short[frameCount];
+        var right = new short[frameCount];
+        var mono = new short[frameCount];
+        for (int frame = 0; frame < frameCount; frame++)
+        {
+            short leftSample = interleaved[frame * 2];
+            short rightSample = interleaved[frame * 2 + 1];
+            left[frame] = leftSample;
+            right[frame] = rightSample;
+            mono[frame] = (short)((leftSample + rightSample) / 2);
+        }
+
+        double leftPeak = Peak(left);
+        double rightPeak = Peak(right);
+        SamplesAvailable?.Invoke(mono);
+        StereoSamplesAvailable?.Invoke(left, right);
+        LevelAvailable?.Invoke(Math.Max(leftPeak, rightPeak));
+        StereoLevelAvailable?.Invoke(new LevelMeterReading(leftPeak, rightPeak));
+    }
+
+    private static double Peak(short[] samples)
+    {
+        double peak = 0;
+        for (int i = 0; i < samples.Length; i++)
+            peak = Math.Max(peak, Math.Abs(samples[i] / 32768.0));
+        return peak;
+    }
 }

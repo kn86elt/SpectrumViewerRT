@@ -76,7 +76,7 @@ The application is not digitally signed, so Windows may display a security warni
 
 1. Select an audio source from `Source`.
    - `System Output`: audio currently playing through Windows
-   - `Microphone`: audio received from a microphone
+   - `Audio Input`: audio received from the selected input device
 2. Choose a view from `Display`.
    - `Spectrogram`
    - `Spectrum Analyzer (Mono)`

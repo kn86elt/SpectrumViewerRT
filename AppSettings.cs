@@ -5,6 +5,7 @@ namespace SpectrumViewerRT;
 
 public sealed class AppSettings
 {
+    public int SettingsVersion { get; set; } = Defaults.SettingsVersion;
     public double Gain { get; set; } = Defaults.Gain;
     public double RangeDb { get; set; } = Defaults.RangeDb;
     public double Fps { get; set; } = Defaults.Fps;
@@ -43,6 +44,7 @@ public sealed class AppSettings
     public bool TextureEnabled { get; set; } = Defaults.TextureEnabled;
     public bool VuNormalizeEnabled { get; set; } = Defaults.VuNormalizeEnabled;
     public bool CompensateSystemOutputVolume { get; set; } = Defaults.CompensateSystemOutputVolume;
+    public int StereoSplitModeIndex { get; set; } = Defaults.StereoSplitModeIndex;
 
     public static string SettingsPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpectrumViewerRT", "settings.json");
@@ -55,6 +57,16 @@ public sealed class AppSettings
                 return new AppSettings();
 
             var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath));
+            if (settings != null && settings.SettingsVersion < 2)
+            {
+                settings.DisplayModeIndex = settings.DisplayModeIndex switch
+                {
+                    1 => 2,
+                    2 => 3,
+                    _ => 0
+                };
+                settings.SettingsVersion = 2;
+            }
             return settings?.Sanitized() ?? new AppSettings();
         }
         catch
@@ -84,7 +96,8 @@ public sealed class AppSettings
         MeterColorIndex = Math.Clamp(MeterColorIndex, 0, 3);
         MeterStyleIndex = Math.Clamp(MeterStyleIndex, 0, 3);
         StatusDisplayStyleIndex = Math.Clamp(StatusDisplayStyleIndex, 0, 1);
-        DisplayModeIndex = Math.Clamp(DisplayModeIndex, 0, 2);
+        SettingsVersion = Defaults.SettingsVersion;
+        DisplayModeIndex = Math.Clamp(DisplayModeIndex, 0, 3);
         AnalyzerModeIndex = Math.Clamp(AnalyzerModeIndex, 0, 1);
         MonoAnalyzerBandCount = Math.Clamp(MonoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
         StereoAnalyzerBandCount = Math.Clamp(StereoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
@@ -94,12 +107,14 @@ public sealed class AppSettings
         StereoAnalyzerMaxBandWidth = Math.Clamp(StereoAnalyzerMaxBandWidth, 4, 160);
         MonoAnalyzerMaxBandGap = Math.Clamp(MonoAnalyzerMaxBandGap, 1, 48);
         StereoAnalyzerMaxBandGap = Math.Clamp(StereoAnalyzerMaxBandGap, 1, 32);
+        StereoSplitModeIndex = Math.Clamp(StereoSplitModeIndex, 0, 1);
         return this;
     }
 }
 
 public static class Defaults
 {
+    public const int SettingsVersion = 2;
     public const double Gain = 2.4;
     public const double MinGain = 0.2;
     public const double MaxGain = 8.0;
@@ -120,6 +135,7 @@ public static class Defaults
     public const int StatusDisplayStyleIndex = 0;
     public const int DisplayModeIndex = 0;
     public const int AnalyzerModeIndex = 0;
+    public const int StereoSplitModeIndex = 0;
     public const int AnalyzerBandCount = 48;
     public const int MinAnalyzerBandCount = 3;
     public const int MaxAnalyzerBandCount = 96;

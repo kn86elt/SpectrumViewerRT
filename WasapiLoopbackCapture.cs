@@ -56,6 +56,7 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
     }
 
     private const int OutputSampleRate = AudioCapture.DefaultSampleRate;
+    public bool IsStereo => true;
     private volatile bool _running;
     private Thread? _thread;
     private readonly AutoResetEvent _stopEvent = new(false);

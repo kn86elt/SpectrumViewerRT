@@ -9,6 +9,7 @@ public interface IAudioCaptureSource : IDisposable
     event Action<string>? StatusAvailable;
     event Action<string>? CaptureStopped;
     int SampleRate { get; }
+    bool IsStereo { get; }
     void Start();
     void Stop();
 }

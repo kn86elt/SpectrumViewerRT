@@ -44,6 +44,8 @@ public partial class MainWindow : Window
     private readonly ConcurrentQueue<StereoPacket> _pendingStereoSamples = new();
     private readonly List<short> _sampleWindow = new(FftSize * 2);
     private readonly List<short> _spectrogramSamples = new(FftSize * 3);
+    private readonly List<short> _leftSpectrogramSamples = new(FftSize * 3);
+    private readonly List<short> _rightSpectrogramSamples = new(FftSize * 3);
     private readonly List<short> _leftSampleWindow = new(FftSize * 2);
     private readonly List<short> _rightSampleWindow = new(FftSize * 2);
     private readonly List<short> _recorded = new();
@@ -60,11 +62,14 @@ public partial class MainWindow : Window
     private readonly int[] _spectrogramBins = new int[ImageHeight];
     private readonly double[] _spectrogramBinFractions = new double[ImageHeight];
     private byte[] _pendingSpectrogramIntensity = new byte[ImageHeight];
+    private byte[] _pendingLeftSpectrogramIntensity = new byte[ImageHeight];
+    private byte[] _pendingRightSpectrogramIntensity = new byte[ImageHeight];
     private readonly List<short> _latestRenderSamples = new();
     private const double TimeDivisions = 10.0;
     private double _scrollColumnAccumulator;
     private double _spectrogramColumnAccumulator;
     private int _spectrogramSampleOffset;
+    private int _stereoSpectrogramSampleOffset;
     private double[] _analyzerLevels = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
     private double[] _analyzerHolds = CreateAnalyzerValues(Defaults.AnalyzerBandCount);
     private DateTime[] _analyzerHoldUntil = new DateTime[Defaults.AnalyzerBandCount];
@@ -141,6 +146,7 @@ public partial class MainWindow : Window
     private HwndSource? _windowSource;
     private int _cachedSpectrogramScaleIndex = int.MinValue;
     private int _cachedSpectrogramMaxFrequencyIndex = int.MinValue;
+    private StereoSplitMode _stereoSplitMode = StereoSplitMode.LeftRight;
 
     private readonly record struct PanelVisibilityState(
         bool Transport,
@@ -160,8 +166,12 @@ public partial class MainWindow : Window
         (LevelMeterMenuItem.IsChecked ? 8 : 0);
 
     private readonly record struct SpectrogramSlice(byte[] Intensities, int Width);
+    private readonly record struct StereoSpectrogramSlice(byte[] Left, byte[] Right, int Width);
 
     private static double[] CreateAnalyzerValues(int count) => Enumerable.Repeat(-90.0, count).ToArray();
+
+    private bool IsAnalyzerMode => DisplayModeCombo.SelectedIndex >= 2;
+    private bool IsStereoDisplayMode => DisplayModeCombo.SelectedIndex is 1 or 3;
 
     private static double[] CreateHannWindow()
     {
@@ -176,7 +186,7 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _loadingSettings = true;
-        ModeCombo.Items.Add(new ComboBoxItem { Content = "Microphone", Tag = CaptureMode.Microphone });
+        ModeCombo.Items.Add(new ComboBoxItem { Content = "Audio Input", Tag = CaptureMode.Microphone });
         ModeCombo.Items.Add(new ComboBoxItem { Content = "System Output", Tag = CaptureMode.SystemOutput });
         ScaleCombo.Items.Add("Linear");
         ScaleCombo.Items.Add("Log");
@@ -194,6 +204,7 @@ public partial class MainWindow : Window
         MeterStyleCombo.Items.Add("Dot Matrix Block");
         MeterStyleCombo.Items.Add("Dot Matrix Fine Lines");
         DisplayModeCombo.Items.Add("Spectrogram");
+        DisplayModeCombo.Items.Add("Spectrogram (Stereo)");
         DisplayModeCombo.Items.Add("Spectrum Analyzer (Mono)");
         DisplayModeCombo.Items.Add("Spectrum Analyzer (Stereo)");
         ApplySettings(AppSettings.Load());
@@ -311,13 +322,18 @@ public partial class MainWindow : Window
             }
             _sampleWindow.Clear();
             _spectrogramSamples.Clear();
+            _leftSpectrogramSamples.Clear();
+            _rightSpectrogramSamples.Clear();
             _spectrogramSampleOffset = 0;
+            _stereoSpectrogramSampleOffset = 0;
             _leftSampleWindow.Clear();
             _rightSampleWindow.Clear();
             _latestRenderSamples.Clear();
             _scrollColumnAccumulator = 0;
             _spectrogramColumnAccumulator = 0;
             Array.Clear(_pendingSpectrogramIntensity);
+            Array.Clear(_pendingLeftSpectrogramIntensity);
+            Array.Clear(_pendingRightSpectrogramIntensity);
             _peak = 0;
             _currentLevel = default;
             _peakHoldLevel = default;
@@ -327,8 +343,6 @@ public partial class MainWindow : Window
             ClearWaveform();
 
             _isRecording = record;
-            if (record && clearRecording)
-                _recordingStereo = SelectedMode == CaptureMode.SystemOutput;
             var capture = CreateCaptureSource();
             _capture = capture;
             capture.SamplesAvailable += samples =>
@@ -369,6 +383,8 @@ public partial class MainWindow : Window
 
             _monitor = null;
             capture.Start();
+            if (record && clearRecording)
+                _recordingStereo = capture.IsStereo;
 
             _recordingStarted = DateTime.Now;
             _renderTimer.Interval = TimeSpan.FromSeconds(1.0 / Math.Max(1.0, FpsSlider.Value));
@@ -377,8 +393,8 @@ public partial class MainWindow : Window
             SetInputControlsEnabled(true);
             UpdateTransportButtons();
             SetStatus(record
-                ? (SelectedMode == CaptureMode.SystemOutput ? "Recording system output" : "Recording microphone")
-                : (SelectedMode == CaptureMode.SystemOutput ? "Monitoring system output" : "Monitoring microphone"));
+                ? (SelectedMode == CaptureMode.SystemOutput ? "Recording system output" : "Recording audio input")
+                : (SelectedMode == CaptureMode.SystemOutput ? "Monitoring system output" : "Monitoring audio input"));
         }
         catch (Exception ex)
         {
@@ -424,7 +440,7 @@ public partial class MainWindow : Window
             if (_capture == null)
                 BeginCapture(record: false);
             else if (!_isRecording)
-                SetStatus(SelectedMode == CaptureMode.SystemOutput ? "Monitoring system output" : "Monitoring microphone");
+                SetStatus(SelectedMode == CaptureMode.SystemOutput ? "Monitoring system output" : "Monitoring audio input");
         }
         else if (_capture != null && !_isRecording)
         {
@@ -766,6 +782,11 @@ public partial class MainWindow : Window
 
             AppendStereoWindow(_leftSampleWindow, stereo.Left, length);
             AppendStereoWindow(_rightSampleWindow, stereo.Right, length);
+            if (DisplayModeCombo.SelectedIndex == 1)
+            {
+                AppendStereoWindow(_leftSpectrogramSamples, stereo.Left, length);
+                AppendStereoWindow(_rightSpectrogramSamples, stereo.Right, length);
+            }
         }
 
         if (_sampleWindow.Count > FftSize * 2)
@@ -775,14 +796,17 @@ public partial class MainWindow : Window
 
         if (appended > 0)
         {
-            if (DisplayModeCombo.SelectedIndex > 0)
+            if (IsAnalyzerMode)
             {
                 if (_sampleWindow.Count >= FftSize)
                     DrawSpectrumAnalyzerFrame();
             }
             else
             {
-                DrawPendingSpectrogramFrames();
+                if (DisplayModeCombo.SelectedIndex == 1)
+                    DrawPendingStereoSpectrogramFrames();
+                else
+                    DrawPendingSpectrogramFrames();
             }
 
             _scrollColumnAccumulator += PixelsPerSecond * appended / DisplaySampleRate;
@@ -794,7 +818,7 @@ public partial class MainWindow : Window
                 _latestRenderSamples.Clear();
             }
         }
-        else if (DisplayModeCombo.SelectedIndex > 0 && _capture != null)
+        else if (IsAnalyzerMode && _capture != null)
         {
             DecaySpectrumAnalyzerHolds(DateTime.Now);
         }
@@ -1063,7 +1087,7 @@ public partial class MainWindow : Window
         if (_sampleWindow.Count < FftSize)
             return;
 
-        if (DisplayModeCombo.SelectedIndex == 2 && _leftSampleWindow.Count >= FftSize && _rightSampleWindow.Count >= FftSize)
+        if (DisplayModeCombo.SelectedIndex == 3 && _leftSampleWindow.Count >= FftSize && _rightSampleWindow.Count >= FftSize)
         {
             ComputeAnalyzerLevels(_leftSampleWindow, _leftAnalyzerLevels, _leftAnalyzerHolds, _leftAnalyzerHoldUntil);
             ComputeAnalyzerLevels(_rightSampleWindow, _rightAnalyzerLevels, _rightAnalyzerHolds, _rightAnalyzerHoldUntil);
@@ -1183,6 +1207,35 @@ public partial class MainWindow : Window
             DrawSpectrumSlices(slices);
     }
 
+    private void DrawPendingStereoSpectrogramFrames()
+    {
+        var slices = new List<StereoSpectrogramSlice>();
+        int available = Math.Min(_leftSpectrogramSamples.Count, _rightSpectrogramSamples.Count);
+        while (available - _stereoSpectrogramSampleOffset >= FftSize)
+        {
+            byte[] left = ComputeSpectrogramIntensity(
+                _leftSpectrogramSamples,
+                _stereoSpectrogramSampleOffset);
+            byte[] right = ComputeSpectrogramIntensity(
+                _rightSpectrogramSamples,
+                _stereoSpectrogramSampleOffset);
+            AccumulateStereoSpectrogramSlice(left, right, slices);
+            _stereoSpectrogramSampleOffset += SpectrogramHopSamples;
+        }
+
+        if (_stereoSpectrogramSampleOffset > 0 &&
+            (_stereoSpectrogramSampleOffset >= FftSize ||
+             _stereoSpectrogramSampleOffset > available / 2))
+        {
+            _leftSpectrogramSamples.RemoveRange(0, _stereoSpectrogramSampleOffset);
+            _rightSpectrogramSamples.RemoveRange(0, _stereoSpectrogramSampleOffset);
+            _stereoSpectrogramSampleOffset = 0;
+        }
+
+        if (slices.Count > 0)
+            DrawStereoSpectrumSlices(slices);
+    }
+
     private byte[] ComputeSpectrogramIntensity(List<short> samples, int start)
     {
         double gain = GainSlider.Value;
@@ -1225,6 +1278,37 @@ public partial class MainWindow : Window
         _spectrogramColumnAccumulator -= columns;
         slices.Add(new SpectrogramSlice(_pendingSpectrogramIntensity, columns));
         _pendingSpectrogramIntensity = new byte[ImageHeight];
+    }
+
+    private void AccumulateStereoSpectrogramSlice(
+        byte[] left,
+        byte[] right,
+        List<StereoSpectrogramSlice> slices)
+    {
+        for (int y = 0; y < ImageHeight; y++)
+        {
+            _pendingLeftSpectrogramIntensity[y] =
+                Math.Max(_pendingLeftSpectrogramIntensity[y], left[y]);
+            _pendingRightSpectrogramIntensity[y] =
+                Math.Max(_pendingRightSpectrogramIntensity[y], right[y]);
+        }
+
+        double displayWidth = _stereoSplitMode == StereoSplitMode.LeftRight
+            ? ImageWidth / 2.0
+            : ImageWidth;
+        _spectrogramColumnAccumulator +=
+            displayWidth / VisibleSeconds * SpectrogramHopSamples / DisplaySampleRate;
+        int columns = Math.Min((int)displayWidth, (int)_spectrogramColumnAccumulator);
+        if (columns <= 0)
+            return;
+
+        _spectrogramColumnAccumulator -= columns;
+        slices.Add(new StereoSpectrogramSlice(
+            _pendingLeftSpectrogramIntensity,
+            _pendingRightSpectrogramIntensity,
+            columns));
+        _pendingLeftSpectrogramIntensity = new byte[ImageHeight];
+        _pendingRightSpectrogramIntensity = new byte[ImageHeight];
     }
 
     private void DrawSpectrumSlices(List<SpectrogramSlice> slices)
@@ -1271,6 +1355,115 @@ public partial class MainWindow : Window
         }
 
         _spectrogram.WritePixels(new Int32Rect(0, 0, ImageWidth, ImageHeight), _pixels, ImageWidth * 4, 0);
+    }
+
+    private void DrawStereoSpectrumSlices(List<StereoSpectrogramSlice> slices)
+    {
+        if (_stereoSplitMode == StereoSplitMode.LeftRight)
+        {
+            int divider = 2;
+            int leftWidth = (ImageWidth - divider) / 2;
+            int rightX = leftWidth + divider;
+            DrawStereoSpectrogramPanel(
+                new Int32Rect(0, 0, leftWidth, ImageHeight),
+                slices,
+                slice => slice.Left);
+            DrawStereoSpectrogramPanel(
+                new Int32Rect(rightX, 0, ImageWidth - rightX, ImageHeight),
+                slices,
+                slice => slice.Right);
+            ClearSpectrogramDivider(new Int32Rect(leftWidth, 0, divider, ImageHeight));
+        }
+        else
+        {
+            int divider = 2;
+            int topHeight = (ImageHeight - divider) / 2;
+            int bottomY = topHeight + divider;
+            DrawStereoSpectrogramPanel(
+                new Int32Rect(0, 0, ImageWidth, topHeight),
+                slices,
+                slice => slice.Left);
+            DrawStereoSpectrogramPanel(
+                new Int32Rect(0, bottomY, ImageWidth, ImageHeight - bottomY),
+                slices,
+                slice => slice.Right);
+            ClearSpectrogramDivider(new Int32Rect(0, topHeight, ImageWidth, divider));
+        }
+
+        _spectrogram.WritePixels(
+            new Int32Rect(0, 0, ImageWidth, ImageHeight),
+            _pixels,
+            ImageWidth * 4,
+            0);
+    }
+
+    private void DrawStereoSpectrogramPanel(
+        Int32Rect panel,
+        List<StereoSpectrogramSlice> slices,
+        Func<StereoSpectrogramSlice, byte[]> channelSelector)
+    {
+        int totalColumns = Math.Min(panel.Width, slices.Sum(slice => slice.Width));
+        if (totalColumns <= 0)
+            return;
+
+        const int bytesPerPixel = 4;
+        int rowBytes = ImageWidth * bytesPerPixel;
+        int shiftBytes = totalColumns * bytesPerPixel;
+        int panelBytes = panel.Width * bytesPerPixel;
+        for (int y = panel.Y; y < panel.Y + panel.Height; y++)
+        {
+            int rowStart = y * rowBytes + panel.X * bytesPerPixel;
+            if (totalColumns < panel.Width)
+            {
+                Buffer.BlockCopy(
+                    _pixels,
+                    rowStart + shiftBytes,
+                    _pixels,
+                    rowStart,
+                    panelBytes - shiftBytes);
+            }
+            Array.Clear(_pixels, rowStart + panelBytes - shiftBytes, shiftBytes);
+        }
+
+        int x = panel.X + panel.Width - totalColumns;
+        int skippedColumns = Math.Max(0, slices.Sum(slice => slice.Width) - totalColumns);
+        foreach (var slice in slices)
+        {
+            int sliceStart = Math.Min(slice.Width, skippedColumns);
+            skippedColumns -= sliceStart;
+            int width = slice.Width - sliceStart;
+            if (width <= 0)
+                continue;
+
+            byte[] intensities = channelSelector(slice);
+            for (int panelY = 0; panelY < panel.Height; panelY++)
+            {
+                int sourceY = Math.Clamp(
+                    (int)Math.Round(panelY * (ImageHeight - 1.0) / Math.Max(1, panel.Height - 1)),
+                    0,
+                    ImageHeight - 1);
+                var color = ColorMap(intensities[sourceY] / 255.0);
+                for (int column = 0; column < width; column++)
+                {
+                    int index = ((panel.Y + panelY) * ImageWidth + x + column) * 4;
+                    _pixels[index + 0] = color.B;
+                    _pixels[index + 1] = color.G;
+                    _pixels[index + 2] = color.R;
+                    _pixels[index + 3] = 255;
+                }
+            }
+
+            x += width;
+        }
+    }
+
+    private void ClearSpectrogramDivider(Int32Rect divider)
+    {
+        for (int y = divider.Y; y < divider.Y + divider.Height; y++)
+        {
+            int start = (y * ImageWidth + divider.X) * 4;
+            Array.Clear(_pixels, start, divider.Width * 4);
+        }
     }
 
     private void EnsureSpectrogramBinMap()
@@ -1538,7 +1731,7 @@ public partial class MainWindow : Window
             return;
 
         DrawFrequencyGrid();
-        DrawTimeGrid(SpectrogramGridCanvas);
+        DrawSpectrogramTimeGrid();
         DrawTimeGrid(WaveformGridCanvas, false);
         DrawTimeAxis();
     }
@@ -1550,12 +1743,105 @@ public partial class MainWindow : Window
         if (width <= 0 || height <= 0)
             return;
 
+        if (DisplayModeCombo.SelectedIndex != 1)
+        {
+            DrawFrequencyGridPanel(new Rect(0, 0, width, height), string.Empty);
+            return;
+        }
+
+        const double divider = 2;
+        if (_stereoSplitMode == StereoSplitMode.LeftRight)
+        {
+            double panelWidth = (width - divider) / 2.0;
+            DrawFrequencyGridPanel(new Rect(0, 0, panelWidth, height), "L");
+            DrawFrequencyGridPanel(
+                new Rect(panelWidth + divider, 0, panelWidth, height),
+                "R");
+            AddLine(
+                SpectrogramGridCanvas,
+                panelWidth + divider / 2.0,
+                0,
+                panelWidth + divider / 2.0,
+                height,
+                110,
+                130,
+                145,
+                0.9);
+        }
+        else
+        {
+            double panelHeight = (height - divider) / 2.0;
+            DrawFrequencyGridPanel(new Rect(0, 0, width, panelHeight), "L");
+            DrawFrequencyGridPanel(
+                new Rect(0, panelHeight + divider, width, panelHeight),
+                "R");
+            AddLine(
+                SpectrogramGridCanvas,
+                0,
+                panelHeight + divider / 2.0,
+                width,
+                panelHeight + divider / 2.0,
+                110,
+                130,
+                145,
+                0.9);
+        }
+    }
+
+    private void DrawFrequencyGridPanel(Rect panel, string channel)
+    {
         foreach (double frequency in FrequencyGridValues())
         {
-            double y = FrequencyToCanvasY(frequency, height);
-            AddLine(SpectrogramGridCanvas, 0, y, width, y, 60, 72, 86, 0.55);
-            AddLabel(SpectrogramGridCanvas, FormatFrequency(frequency), 8, Math.Max(2, y - 16), 150);
+            double y = panel.Top + FrequencyToCanvasY(frequency, panel.Height);
+            AddLine(
+                SpectrogramGridCanvas,
+                panel.Left,
+                y,
+                panel.Right,
+                y,
+                60,
+                72,
+                86,
+                0.55);
+            AddLabel(
+                SpectrogramGridCanvas,
+                FormatFrequency(frequency),
+                panel.Left + 8,
+                Math.Max(panel.Top + 2, y - 16),
+                150);
         }
+
+        if (!string.IsNullOrEmpty(channel))
+            AddLabel(SpectrogramGridCanvas, channel, panel.Left + panel.Width - 24, panel.Top + 6, 150);
+    }
+
+    private void DrawSpectrogramTimeGrid()
+    {
+        if (DisplayModeCombo.SelectedIndex != 1 ||
+            _stereoSplitMode == StereoSplitMode.TopBottom)
+        {
+            DrawTimeGrid(SpectrogramGridCanvas);
+            return;
+        }
+
+        double width = SpectrogramGridCanvas.ActualWidth;
+        double height = SpectrogramGridCanvas.ActualHeight;
+        double panelWidth = (width - 2) / 2.0;
+        DrawTimeGridPanel(SpectrogramGridCanvas, new Rect(0, 0, panelWidth, height));
+        DrawTimeGridPanel(
+            SpectrogramGridCanvas,
+            new Rect(panelWidth + 2, 0, panelWidth, height));
+    }
+
+    private void DrawTimeGridPanel(Canvas canvas, Rect panel)
+    {
+        double secondsPerDivision = Math.Max(0.05, TimeDivisionSlider.Value);
+        double pixelsPerDivision = secondsPerDivision * panel.Width / VisibleSeconds;
+        if (pixelsPerDivision < 8)
+            pixelsPerDivision = 8;
+
+        for (double x = panel.Right; x >= panel.Left; x -= pixelsPerDivision)
+            AddLine(canvas, x, panel.Top, x, panel.Bottom, 60, 72, 86, 0.45);
     }
 
     private IEnumerable<double> FrequencyGridValues()
@@ -1806,11 +2092,16 @@ public partial class MainWindow : Window
         ClearWaveform();
         _sampleWindow.Clear();
         _spectrogramSamples.Clear();
+        _leftSpectrogramSamples.Clear();
+        _rightSpectrogramSamples.Clear();
         _spectrogramSampleOffset = 0;
+        _stereoSpectrogramSampleOffset = 0;
         _latestRenderSamples.Clear();
         _scrollColumnAccumulator = 0;
         _spectrogramColumnAccumulator = 0;
         Array.Clear(_pendingSpectrogramIntensity);
+        Array.Clear(_pendingLeftSpectrogramIntensity);
+        Array.Clear(_pendingRightSpectrogramIntensity);
         _currentLevel = default;
         _peakHoldLevel = default;
         Array.Fill(_analyzerLevels, -90.0);
@@ -1893,9 +2184,8 @@ public partial class MainWindow : Window
         MeterColorCombo.SelectedIndex = settings.MeterColorIndex;
         MeterStyleCombo.SelectedIndex = settings.MeterStyleIndex;
         SetStatusDisplayStyle(settings.StatusDisplayStyleIndex);
-        DisplayModeCombo.SelectedIndex = settings.DisplayModeIndex == 0
-            ? 0
-            : settings.AnalyzerModeIndex == 1 || settings.DisplayModeIndex == 2 ? 2 : 1;
+        DisplayModeCombo.SelectedIndex = settings.DisplayModeIndex;
+        _stereoSplitMode = (StereoSplitMode)settings.StereoSplitModeIndex;
         _monoAnalyzerBandCount = settings.MonoAnalyzerBandCount;
         _stereoAnalyzerBandCount = settings.StereoAnalyzerBandCount;
         _monoCustomAnalyzerBandCount = settings.MonoCustomAnalyzerBandCount;
@@ -1947,7 +2237,7 @@ public partial class MainWindow : Window
         MeterStyleIndex = MeterStyleCombo.SelectedIndex,
         StatusDisplayStyleIndex = StatusSegmentMenuItem.IsChecked ? 1 : 0,
         DisplayModeIndex = DisplayModeCombo.SelectedIndex,
-        AnalyzerModeIndex = DisplayModeCombo.SelectedIndex == 2 ? 1 : 0,
+        AnalyzerModeIndex = DisplayModeCombo.SelectedIndex == 3 ? 1 : 0,
         MonoAnalyzerBandCount = _monoAnalyzerBandCount,
         StereoAnalyzerBandCount = _stereoAnalyzerBandCount,
         MonoCustomAnalyzerBandCount = _monoCustomAnalyzerBandCount,
@@ -1973,7 +2263,8 @@ public partial class MainWindow : Window
         GlowEnabled = GlowCheck.IsChecked == true,
         TextureEnabled = TextureCheck.IsChecked == true,
         VuNormalizeEnabled = VuNormalizeCheck.IsChecked == true,
-        CompensateSystemOutputVolume = CompensateSystemVolumeCheck.IsChecked == true
+        CompensateSystemOutputVolume = CompensateSystemVolumeCheck.IsChecked == true,
+        StereoSplitModeIndex = (int)_stereoSplitMode
         };
     }
 
@@ -2188,7 +2479,7 @@ public partial class MainWindow : Window
     private void UpdateSpectrumAnalyzerDisplay()
     {
         ApplyAnalyzerLayoutSettings();
-        if (DisplayModeCombo.SelectedIndex == 2)
+        if (DisplayModeCombo.SelectedIndex == 3)
         {
             SpectrumAnalyzer.UpdateStereo(
                 _leftAnalyzerLevels,
@@ -2215,7 +2506,8 @@ public partial class MainWindow : Window
 
     private void ApplyAnalyzerLayoutSettings()
     {
-        bool stereo = DisplayModeCombo.SelectedIndex == 2;
+        bool stereo = DisplayModeCombo.SelectedIndex == 3;
+        SpectrumAnalyzer.StereoSplitMode = _stereoSplitMode;
         SpectrumAnalyzer.MaximumBandWidth = stereo
             ? _stereoAnalyzerMaxBandWidth
             : _monoAnalyzerMaxBandWidth;
@@ -2238,8 +2530,10 @@ public partial class MainWindow : Window
     private void DisplayModeContextMenuItem_Click(object sender, RoutedEventArgs e)
     {
         int index = sender == ContextDisplayAnalyzerMonoMenuItem
-            ? 1
-            : sender == ContextDisplayAnalyzerStereoMenuItem ? 2 : 0;
+            ? 2
+            : sender == ContextDisplayAnalyzerStereoMenuItem
+                ? 3
+                : sender == ContextDisplaySpectrogramStereoMenuItem ? 1 : 0;
 
         if (DisplayModeCombo.SelectedIndex == index)
         {
@@ -2252,7 +2546,7 @@ public partial class MainWindow : Window
 
     private void ApplyDisplayMode()
     {
-        bool analyzer = DisplayModeCombo.SelectedIndex > 0;
+        bool analyzer = IsAnalyzerMode;
         SyncDisplayModeContextMenu();
         UpdateAnalyzerBandsButton();
         SettingsPrimaryPanel.IsEnabled = !analyzer;
@@ -2270,7 +2564,7 @@ public partial class MainWindow : Window
     }
 
     private int ActiveAnalyzerBandCount =>
-        DisplayModeCombo.SelectedIndex == 2 ? _stereoAnalyzerBandCount : _monoAnalyzerBandCount;
+        DisplayModeCombo.SelectedIndex == 3 ? _stereoAnalyzerBandCount : _monoAnalyzerBandCount;
 
     private void AnalyzerBandsButton_Click(object sender, RoutedEventArgs e)
     {
@@ -2297,7 +2591,7 @@ public partial class MainWindow : Window
     private void AnalyzerBandCustomMenuItem_Click(object sender, RoutedEventArgs e)
     {
         SetActiveAnalyzerBandCount(
-            DisplayModeCombo.SelectedIndex == 2
+            DisplayModeCombo.SelectedIndex == 3
                 ? _stereoCustomAnalyzerBandCount
                 : _monoCustomAnalyzerBandCount);
     }
@@ -2348,9 +2642,9 @@ public partial class MainWindow : Window
             _stereoAnalyzerMaxBandWidth = stereoWidth;
             _monoAnalyzerMaxBandGap = monoGap;
             _stereoAnalyzerMaxBandGap = stereoGap;
-            if (DisplayModeCombo.SelectedIndex == 1)
+            if (DisplayModeCombo.SelectedIndex == 2)
                 _monoAnalyzerBandCount = mono;
-            else if (DisplayModeCombo.SelectedIndex == 2)
+            else if (DisplayModeCombo.SelectedIndex == 3)
                 _stereoAnalyzerBandCount = stereo;
             dialog.DialogResult = true;
         };
@@ -2436,7 +2730,7 @@ public partial class MainWindow : Window
     private void SetActiveAnalyzerBandCount(int count)
     {
         count = Math.Clamp(count, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
-        if (DisplayModeCombo.SelectedIndex == 2)
+        if (DisplayModeCombo.SelectedIndex == 3)
             _stereoAnalyzerBandCount = count;
         else
             _monoAnalyzerBandCount = count;
@@ -2475,7 +2769,7 @@ public partial class MainWindow : Window
             return;
 
         AnalyzerBandsButton.Content = $"Bands: {ActiveAnalyzerBandCount}";
-        AnalyzerBandsButton.IsEnabled = DisplayModeCombo.SelectedIndex > 0;
+        AnalyzerBandsButton.IsEnabled = IsAnalyzerMode;
         AnalyzerBandsButton.Opacity = AnalyzerBandsButton.IsEnabled ? 1.0 : 0.42;
     }
 
@@ -2485,7 +2779,7 @@ public partial class MainWindow : Window
             return;
 
         int active = ActiveAnalyzerBandCount;
-        int custom = DisplayModeCombo.SelectedIndex == 2
+        int custom = DisplayModeCombo.SelectedIndex == 3
             ? _stereoCustomAnalyzerBandCount
             : _monoCustomAnalyzerBandCount;
         bool presetMatched = false;
@@ -2508,8 +2802,32 @@ public partial class MainWindow : Window
             return;
 
         ContextDisplaySpectrogramMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 0;
-        ContextDisplayAnalyzerMonoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 1;
-        ContextDisplayAnalyzerStereoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 2;
+        ContextDisplaySpectrogramStereoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 1;
+        ContextDisplayAnalyzerMonoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 2;
+        ContextDisplayAnalyzerStereoMenuItem.IsChecked = DisplayModeCombo.SelectedIndex == 3;
+        ContextStereoSplitLeftRightMenuItem.IsChecked =
+            _stereoSplitMode == StereoSplitMode.LeftRight;
+        ContextStereoSplitTopBottomMenuItem.IsChecked =
+            _stereoSplitMode == StereoSplitMode.TopBottom;
+    }
+
+    private void StereoSplitContextMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        StereoSplitMode mode = sender == ContextStereoSplitTopBottomMenuItem
+            ? StereoSplitMode.TopBottom
+            : StereoSplitMode.LeftRight;
+        if (_stereoSplitMode == mode)
+        {
+            SyncDisplayModeContextMenu();
+            return;
+        }
+
+        _stereoSplitMode = mode;
+        SpectrumAnalyzer.StereoSplitMode = mode;
+        SyncDisplayModeContextMenu();
+        ResetDisplayHistory();
+        UpdateGridOverlay();
+        SaveSettings();
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -2723,7 +3041,7 @@ public partial class MainWindow : Window
         TopPanel.Visibility = showTransport || showSettings ? Visibility.Visible : Visibility.Collapsed;
 
         MainDisplayPanel.Visibility = showMainDisplay ? Visibility.Visible : Visibility.Collapsed;
-        bool showTimeAxis = showMainDisplay && DisplayModeCombo.SelectedIndex == 0;
+        bool showTimeAxis = showMainDisplay && !IsAnalyzerMode;
         TimeAxisPanel.Visibility = showTimeAxis ? Visibility.Visible : Visibility.Collapsed;
         WaveformPanel.Visibility = showWaveform ? Visibility.Visible : Visibility.Collapsed;
         LevelMeterPanel.Visibility = showLevelMeter ? Visibility.Visible : Visibility.Collapsed;

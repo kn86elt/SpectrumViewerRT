@@ -76,7 +76,7 @@ ZIPファイルの中から直接起動せず、必ず先に展開してくだ�
 
 1. `Source`で音の入力元を選びます。
    - `System Output`: パソコンで再生している音
-   - `Microphone`: マイクから入る音
+   - `Audio Input`: 選択した入力デバイスから入る音
 2. `Display`で見たい表示を選びます。
    - `Spectrogram`
    - `Spectrum Analyzer (Mono)`
