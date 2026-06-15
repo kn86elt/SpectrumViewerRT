@@ -45,6 +45,9 @@ public sealed class AppSettings
     public bool VuNormalizeEnabled { get; set; } = Defaults.VuNormalizeEnabled;
     public bool CompensateSystemOutputVolume { get; set; } = Defaults.CompensateSystemOutputVolume;
     public int StereoSplitModeIndex { get; set; } = Defaults.StereoSplitModeIndex;
+    public Dictionary<int, WindowSizeSettings> CompactWindowSizes { get; set; } = new();
+    public List<CustomLayoutSettings> CustomLayouts { get; set; } = new();
+    public CustomLayoutSettings? CustomLayout { get; set; }
 
     public static string SettingsPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpectrumViewerRT", "settings.json");
@@ -108,13 +111,68 @@ public sealed class AppSettings
         MonoAnalyzerMaxBandGap = Math.Clamp(MonoAnalyzerMaxBandGap, 1, 48);
         StereoAnalyzerMaxBandGap = Math.Clamp(StereoAnalyzerMaxBandGap, 1, 32);
         StereoSplitModeIndex = Math.Clamp(StereoSplitModeIndex, 0, 1);
+        CompactWindowSizes = (CompactWindowSizes ?? new Dictionary<int, WindowSizeSettings>())
+            .Where(pair => pair.Key is >= 0 and <= 15 && pair.Value != null)
+            .ToDictionary(
+                pair => pair.Key,
+                pair => new WindowSizeSettings
+                {
+                    Width = Math.Clamp(pair.Value.Width, 480, 10000),
+                    Height = Math.Clamp(pair.Value.Height, 120, 10000)
+                });
+        CustomLayouts ??= new List<CustomLayoutSettings>();
+        if (CustomLayouts.Count == 0 && CustomLayout != null)
+        {
+            CustomLayout.Name = "Custom 1";
+            CustomLayouts.Add(CustomLayout);
+        }
+        CustomLayouts = CustomLayouts
+            .Where(layout => layout != null && !string.IsNullOrWhiteSpace(layout.Name))
+            .Select(SanitizeCustomLayout)
+            .GroupBy(layout => layout.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+        CustomLayout = null;
         return this;
     }
+
+    private static CustomLayoutSettings SanitizeCustomLayout(CustomLayoutSettings layout)
+    {
+        layout.Name = layout.Name.Trim();
+        if (layout.Name.Length > 40)
+            layout.Name = layout.Name[..40];
+        layout.DisplayModeIndex = Math.Clamp(layout.DisplayModeIndex, 0, 3);
+        layout.StereoSplitModeIndex = Math.Clamp(layout.StereoSplitModeIndex, 0, 1);
+        layout.Width = Math.Clamp(layout.Width, 480, 10000);
+        layout.Height = Math.Clamp(layout.Height, 120, 10000);
+        return layout;
+    }
+}
+
+public sealed class WindowSizeSettings
+{
+    public double Width { get; set; }
+    public double Height { get; set; }
+}
+
+public sealed class CustomLayoutSettings
+{
+    public string Name { get; set; } = "";
+    public bool ShowTransportPanel { get; set; }
+    public bool ShowSettingsPanel { get; set; }
+    public bool ShowMainDisplay { get; set; }
+    public bool ShowWaveform { get; set; }
+    public bool ShowLevelMeter { get; set; }
+    public bool CompactMode { get; set; }
+    public int DisplayModeIndex { get; set; }
+    public int StereoSplitModeIndex { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
 }
 
 public static class Defaults
 {
-    public const int SettingsVersion = 2;
+    public const int SettingsVersion = 4;
     public const double Gain = 2.4;
     public const double MinGain = 0.2;
     public const double MaxGain = 8.0;

@@ -142,6 +142,7 @@ public partial class MainWindow : Window
     private PanelVisibilityState _compactPanelState = PanelVisibilityState.CompactDefault;
     private readonly Dictionary<int, Size> _compactWindowSizes = new();
     private int? _activeCompactLayoutKey;
+    private readonly List<CustomLayoutSettings> _customLayouts = new();
     private double _preferredLayoutHeight = 720;
     private HwndSource? _windowSource;
     private int _cachedSpectrogramScaleIndex = int.MinValue;
@@ -2207,6 +2208,11 @@ public partial class MainWindow : Window
             settings.CompactShowMainDisplay,
             settings.CompactShowWaveform,
             settings.CompactShowLevelMeter);
+        _compactWindowSizes.Clear();
+        foreach (var pair in settings.CompactWindowSizes)
+            _compactWindowSizes[pair.Key] = new Size(pair.Value.Width, pair.Value.Height);
+        _customLayouts.Clear();
+        _customLayouts.AddRange(settings.CustomLayouts);
         CompactMenuItem.IsChecked = settings.CompactMode;
         ApplyPanelState(settings.CompactMode ? _compactPanelState : _normalPanelState);
         AlwaysOnTopMenuItem.IsChecked = settings.AlwaysOnTop;
@@ -2219,6 +2225,7 @@ public partial class MainWindow : Window
         LevelMeter.ColorTheme = settings.MeterColorIndex;
         LevelMeter.MeterStyle = settings.MeterStyleIndex;
         ApplyMeterVisualSettings();
+        UpdateCustomLayoutMenuState();
     }
 
     private AppSettings CurrentSettings()
@@ -2264,7 +2271,15 @@ public partial class MainWindow : Window
         TextureEnabled = TextureCheck.IsChecked == true,
         VuNormalizeEnabled = VuNormalizeCheck.IsChecked == true,
         CompensateSystemOutputVolume = CompensateSystemVolumeCheck.IsChecked == true,
-        StereoSplitModeIndex = (int)_stereoSplitMode
+        StereoSplitModeIndex = (int)_stereoSplitMode,
+        CompactWindowSizes = _compactWindowSizes.ToDictionary(
+            pair => pair.Key,
+            pair => new WindowSizeSettings
+            {
+                Width = pair.Value.Width,
+                Height = pair.Value.Height
+            }),
+        CustomLayouts = _customLayouts.ToList()
         };
     }
 
@@ -2894,6 +2909,8 @@ public partial class MainWindow : Window
     private void ToggleCompactMode()
     {
         CapturePanelState(_lastLayoutCompact);
+        if (_lastLayoutCompact)
+            CaptureActiveCompactWindowSize();
         CompactMenuItem.IsChecked = !CompactMenuItem.IsChecked;
         ApplyPanelState(CompactMenuItem.IsChecked ? _compactPanelState : _normalPanelState);
         ApplyWindowLayout();
@@ -2929,7 +2946,11 @@ public partial class MainWindow : Window
 
         bool modeChanged = sender == CompactMenuItem || sender == ContextCompactMenuItem;
         if (modeChanged)
+        {
             CapturePanelState(_lastLayoutCompact);
+            if (_lastLayoutCompact)
+                CaptureActiveCompactWindowSize();
+        }
 
         if (sender == ContextTransportMenuItem)
             TransportMenuItem.IsChecked = ContextTransportMenuItem.IsChecked;
@@ -2951,6 +2972,490 @@ public partial class MainWindow : Window
 
         ApplyWindowLayout();
         SaveSettings();
+    }
+
+    private void SaveCustomLayoutMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        string suggestedName = GetNextCustomLayoutName();
+        string? name = PromptCustomLayoutName(this, suggestedName, "Save Custom Layout", "Save");
+        if (name == null)
+            return;
+
+        CapturePanelState(CompactMenuItem.IsChecked);
+        if (CompactMenuItem.IsChecked)
+            CaptureActiveCompactWindowSize();
+
+        var layout = new CustomLayoutSettings
+        {
+            Name = name,
+            ShowTransportPanel = TransportMenuItem.IsChecked,
+            ShowSettingsPanel = SettingsMenuItem.IsChecked,
+            ShowMainDisplay = MainDisplayMenuItem.IsChecked,
+            ShowWaveform = WaveformMenuItem.IsChecked,
+            ShowLevelMeter = LevelMeterMenuItem.IsChecked,
+            CompactMode = CompactMenuItem.IsChecked,
+            DisplayModeIndex = DisplayModeCombo.SelectedIndex,
+            StereoSplitModeIndex = (int)_stereoSplitMode,
+            Width = Math.Max(MinWidth, ActualWidth),
+            Height = Math.Max(MinHeight, ActualHeight)
+        };
+        int existingIndex = _customLayouts.FindIndex(
+            item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existingIndex >= 0)
+        {
+            var result = MessageBox.Show(
+                this,
+                $"Overwrite the saved layout \"{_customLayouts[existingIndex].Name}\"?",
+                "Save Custom Layout",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            _customLayouts[existingIndex] = layout;
+        }
+        else
+        {
+            _customLayouts.Add(layout);
+        }
+
+        UpdateCustomLayoutMenuState();
+        SaveSettings();
+        SetStatus($"Custom layout saved: {name}");
+    }
+
+    private void LoadCustomLayoutMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: CustomLayoutSettings layout })
+            return;
+
+        ApplyCustomLayout(layout);
+    }
+
+    private void ApplyCustomLayout(CustomLayoutSettings layout)
+    {
+        if (CompactMenuItem.IsChecked)
+            CaptureActiveCompactWindowSize();
+
+        var state = new PanelVisibilityState(
+            layout.ShowTransportPanel,
+            layout.ShowSettingsPanel,
+            layout.ShowMainDisplay,
+            layout.ShowWaveform,
+            layout.ShowLevelMeter);
+        CompactMenuItem.IsChecked = layout.CompactMode;
+        ApplyPanelState(state);
+        CapturePanelState(layout.CompactMode);
+        _stereoSplitMode = (StereoSplitMode)layout.StereoSplitModeIndex;
+        DisplayModeCombo.SelectedIndex = layout.DisplayModeIndex;
+        ApplyDisplayMode();
+        ApplyWindowLayout();
+
+        _applyingCompactWindowSize = true;
+        try
+        {
+            WindowState = WindowState.Normal;
+            Width = Math.Max(MinWidth, layout.Width);
+            Height = Math.Max(MinHeight, layout.Height);
+        }
+        finally
+        {
+            _applyingCompactWindowSize = false;
+        }
+
+        if (layout.CompactMode)
+        {
+            _activeCompactLayoutKey = CompactLayoutKey;
+            CaptureActiveCompactWindowSize();
+        }
+
+        SyncDisplayModeContextMenu();
+        SaveSettings();
+        SetStatus($"Custom layout loaded: {layout.Name}");
+    }
+
+    private void EditCustomLayoutsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_customLayouts.Count == 0)
+            return;
+
+        ShowCustomLayoutsEditor();
+    }
+
+    private void UpdateCustomLayoutMenuState()
+    {
+        if (LoadCustomLayoutsMenuItem == null || EditCustomLayoutsMenuItem == null)
+            return;
+
+        LoadCustomLayoutsMenuItem.Items.Clear();
+        EditCustomLayoutsMenuItem.Items.Clear();
+        foreach (var layout in _customLayouts)
+        {
+            var loadItem = new MenuItem { Header = layout.Name, Tag = layout };
+            loadItem.Click += LoadCustomLayoutMenuItem_Click;
+            LoadCustomLayoutsMenuItem.Items.Add(loadItem);
+        }
+
+        bool hasCustomLayouts = _customLayouts.Count > 0;
+        LoadCustomLayoutsMenuItem.IsEnabled = hasCustomLayouts;
+        EditCustomLayoutsMenuItem.IsEnabled = hasCustomLayouts;
+    }
+
+    private string GetNextCustomLayoutName()
+    {
+        for (int index = 1; ; index++)
+        {
+            string name = $"Custom {index}";
+            if (!_customLayouts.Any(
+                    item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                return name;
+            }
+        }
+    }
+
+    private string? PromptCustomLayoutName(
+        Window owner,
+        string suggestedName,
+        string title,
+        string confirmText)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Owner = owner,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ResizeMode = ResizeMode.NoResize,
+            Background = new SolidColorBrush(Color.FromRgb(17, 20, 24)),
+            ShowInTaskbar = false
+        };
+        var nameBox = CreateBandCountTextBox(0);
+        nameBox.Text = suggestedName;
+        nameBox.Width = 260;
+        nameBox.TextAlignment = TextAlignment.Left;
+        nameBox.MaxLength = 40;
+        var okButton = new Button { Content = confirmText, MinWidth = 76, IsDefault = true };
+        var cancelButton = new Button { Content = "Cancel", MinWidth = 76, IsCancel = true };
+        okButton.Click += (_, _) =>
+        {
+            string name = nameBox.Text.Trim();
+            if (name.Length == 0)
+            {
+                MessageBox.Show(
+                    dialog,
+                    "Enter a layout name.",
+                    title,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            nameBox.Text = name;
+            dialog.DialogResult = true;
+        };
+
+        var panel = new StackPanel { Margin = new Thickness(18), MinWidth = 300 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Layout name",
+            Foreground = new SolidColorBrush(Color.FromRgb(230, 237, 243))
+        });
+        panel.Children.Add(nameBox);
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 14, 0, 0)
+        };
+        buttons.Children.Add(okButton);
+        buttons.Children.Add(cancelButton);
+        panel.Children.Add(buttons);
+        dialog.Content = panel;
+        dialog.Loaded += (_, _) =>
+        {
+            nameBox.Focus();
+            nameBox.SelectAll();
+        };
+
+        return dialog.ShowDialog() == true ? nameBox.Text : null;
+    }
+
+    private void ShowCustomLayoutsEditor()
+    {
+        var dialog = new Window
+        {
+            Title = "Edit Saved Layouts",
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Width = 780,
+            Height = 520,
+            MinWidth = 680,
+            MinHeight = 440,
+            ResizeMode = ResizeMode.CanResize,
+            Background = new SolidColorBrush(Color.FromRgb(17, 20, 24)),
+            ShowInTaskbar = false
+        };
+        var layoutList = new ListBox
+        {
+            DisplayMemberPath = nameof(CustomLayoutSettings.Name),
+            MinWidth = 210,
+            Foreground = new SolidColorBrush(Color.FromRgb(230, 237, 243)),
+            Background = new SolidColorBrush(Color.FromRgb(10, 15, 20)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(51, 65, 79)),
+            Padding = new Thickness(3)
+        };
+        var nameBox = CreateBandCountTextBox(0);
+        nameBox.Width = double.NaN;
+        nameBox.MinWidth = 240;
+        nameBox.MaxLength = 40;
+        nameBox.TextAlignment = TextAlignment.Left;
+        var details = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.FromRgb(230, 237, 243)),
+            FontFamily = new FontFamily("Consolas"),
+            LineHeight = 22,
+            Margin = new Thickness(0, 16, 0, 0)
+        };
+        var renameButton = new Button { Content = "Rename", MinWidth = 86 };
+        var deleteButton = new Button { Content = "Delete", MinWidth = 86 };
+        var moveUpButton = new Button { Content = "Up", MinWidth = 72 };
+        var moveDownButton = new Button { Content = "Down", MinWidth = 72 };
+        var closeButton = new Button { Content = "Close", MinWidth = 86, IsCancel = true };
+        CustomLayoutSettings? selectedLayout = null;
+
+        void RefreshList(CustomLayoutSettings? selection)
+        {
+            var layouts = _customLayouts.ToList();
+            layoutList.ItemsSource = layouts;
+            layoutList.SelectedItem = selection != null && _customLayouts.Contains(selection)
+                ? selection
+                : layouts.FirstOrDefault();
+        }
+
+        void UpdateSelection(CustomLayoutSettings? layout)
+        {
+            selectedLayout = layout;
+            bool hasSelection = layout != null;
+            nameBox.IsEnabled = hasSelection;
+            renameButton.IsEnabled = hasSelection;
+            deleteButton.IsEnabled = hasSelection;
+            int index = layout == null ? -1 : _customLayouts.IndexOf(layout);
+            moveUpButton.IsEnabled = index > 0;
+            moveDownButton.IsEnabled = index >= 0 && index < _customLayouts.Count - 1;
+            nameBox.Text = layout?.Name ?? "";
+            details.Text = layout == null
+                ? "No saved custom layouts."
+                : FormatCustomLayoutDetails(layout, includeName: false);
+        }
+
+        layoutList.SelectionChanged += (_, _) =>
+        {
+            var layout = layoutList.SelectedItem as CustomLayoutSettings;
+            UpdateSelection(layout);
+            if (layout != null)
+                ApplyCustomLayout(layout);
+        };
+        renameButton.Click += (_, _) =>
+        {
+            if (selectedLayout == null)
+                return;
+
+            string newName = nameBox.Text.Trim();
+            if (newName.Length == 0)
+            {
+                MessageBox.Show(
+                    dialog,
+                    "Enter a layout name.",
+                    "Rename Custom Layout",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                nameBox.Focus();
+                return;
+            }
+            if (string.Equals(newName, selectedLayout.Name, StringComparison.Ordinal))
+                return;
+            if (_customLayouts.Any(
+                    item => !ReferenceEquals(item, selectedLayout) &&
+                            string.Equals(item.Name, newName, StringComparison.OrdinalIgnoreCase)))
+            {
+                MessageBox.Show(
+                    dialog,
+                    $"A layout named \"{newName}\" already exists.",
+                    "Rename Custom Layout",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            selectedLayout.Name = newName;
+            UpdateCustomLayoutMenuState();
+            SaveSettings();
+            SetStatus($"Custom layout renamed: {newName}");
+            RefreshList(selectedLayout);
+        };
+        moveUpButton.Click += (_, _) =>
+        {
+            if (selectedLayout == null)
+                return;
+
+            int index = _customLayouts.IndexOf(selectedLayout);
+            if (index <= 0)
+                return;
+
+            _customLayouts.RemoveAt(index);
+            _customLayouts.Insert(index - 1, selectedLayout);
+            UpdateCustomLayoutMenuState();
+            SaveSettings();
+            RefreshList(selectedLayout);
+        };
+        moveDownButton.Click += (_, _) =>
+        {
+            if (selectedLayout == null)
+                return;
+
+            int index = _customLayouts.IndexOf(selectedLayout);
+            if (index < 0 || index >= _customLayouts.Count - 1)
+                return;
+
+            _customLayouts.RemoveAt(index);
+            _customLayouts.Insert(index + 1, selectedLayout);
+            UpdateCustomLayoutMenuState();
+            SaveSettings();
+            RefreshList(selectedLayout);
+        };
+        nameBox.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                renameButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                e.Handled = true;
+            }
+        };
+        deleteButton.Click += (_, _) =>
+        {
+            if (selectedLayout == null)
+                return;
+
+            var result = MessageBox.Show(
+                dialog,
+                $"Delete the saved layout \"{selectedLayout.Name}\"?",
+                "Delete Custom Layout",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            string deletedName = selectedLayout.Name;
+            int selectedIndex = layoutList.SelectedIndex;
+            _customLayouts.Remove(selectedLayout);
+            UpdateCustomLayoutMenuState();
+            SaveSettings();
+            SetStatus($"Custom layout deleted: {deletedName}");
+            var nextSelection = _customLayouts.ElementAtOrDefault(
+                Math.Min(selectedIndex, Math.Max(0, _customLayouts.Count - 1)));
+            RefreshList(nextSelection);
+        };
+
+        var nameRow = new Grid();
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(renameButton, 1);
+        nameRow.Children.Add(nameBox);
+        nameRow.Children.Add(renameButton);
+
+        var actionButtons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 18, 0, 0)
+        };
+        actionButtons.Children.Add(deleteButton);
+        actionButtons.Children.Add(closeButton);
+        var orderButtons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 10, 0, 0)
+        };
+        orderButtons.Children.Add(moveUpButton);
+        orderButtons.Children.Add(moveDownButton);
+
+        var editorPanel = new Grid { Margin = new Thickness(18) };
+        editorPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
+        editorPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+        editorPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        editorPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        editorPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        editorPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var listHeader = new TextBlock
+        {
+            Text = "Saved layouts",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        var detailsHeader = new TextBlock
+        {
+            Text = "Selected layout",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        var rightPanel = new StackPanel();
+        rightPanel.Children.Add(nameRow);
+        rightPanel.Children.Add(details);
+
+        Grid.SetRow(listHeader, 0);
+        Grid.SetColumn(listHeader, 0);
+        Grid.SetRow(layoutList, 1);
+        Grid.SetColumn(layoutList, 0);
+        Grid.SetRow(orderButtons, 2);
+        Grid.SetColumn(orderButtons, 0);
+        Grid.SetRow(detailsHeader, 0);
+        Grid.SetColumn(detailsHeader, 2);
+        Grid.SetRow(rightPanel, 1);
+        Grid.SetColumn(rightPanel, 2);
+        Grid.SetRow(actionButtons, 2);
+        Grid.SetColumn(actionButtons, 2);
+        editorPanel.Children.Add(listHeader);
+        editorPanel.Children.Add(layoutList);
+        editorPanel.Children.Add(orderButtons);
+        editorPanel.Children.Add(detailsHeader);
+        editorPanel.Children.Add(rightPanel);
+        editorPanel.Children.Add(actionButtons);
+        dialog.Content = editorPanel;
+        RefreshList(_customLayouts.FirstOrDefault());
+        dialog.ShowDialog();
+    }
+
+    private static string FormatCustomLayoutDetails(
+        CustomLayoutSettings layout,
+        bool includeName = true)
+    {
+        string displayMode = layout.DisplayModeIndex switch
+        {
+            1 => "Spectrogram (Stereo)",
+            2 => "Spectrum Analyzer (Mono)",
+            3 => "Spectrum Analyzer (Stereo)",
+            _ => "Spectrogram"
+        };
+        string stereoSplit = layout.StereoSplitModeIndex == (int)StereoSplitMode.TopBottom
+            ? "Top / Bottom"
+            : "Left / Right";
+        static string VisibilityText(bool visible) => visible ? "Shown" : "Hidden";
+
+        string name = includeName ? $"Name               {layout.Name}\n" : "";
+        return
+            name +
+            $"Compact mode       {(layout.CompactMode ? "On" : "Off")}\n" +
+            $"Display mode       {displayMode}\n" +
+            $"Stereo split       {stereoSplit}\n" +
+            $"Window size        {layout.Width:0} x {layout.Height:0}\n\n" +
+            $"Recording/playback {VisibilityText(layout.ShowTransportPanel)}\n" +
+            $"Settings           {VisibilityText(layout.ShowSettingsPanel)}\n" +
+            $"Main display       {VisibilityText(layout.ShowMainDisplay)}\n" +
+            $"Waveform           {VisibilityText(layout.ShowWaveform)}\n" +
+            $"Level meter        {VisibilityText(layout.ShowLevelMeter)}";
     }
 
     private void StatusDisplayStyleMenuItem_Click(object sender, RoutedEventArgs e)
@@ -3350,13 +3855,6 @@ public partial class MainWindow : Window
         if (!_compactSizeApplied)
             return;
 
-        if (_activeCompactLayoutKey.HasValue && WindowState == WindowState.Normal)
-        {
-            _compactWindowSizes[_activeCompactLayoutKey.Value] = new Size(
-                Math.Max(480, ActualWidth),
-                Math.Max(120, ActualHeight));
-        }
-
         _applyingCompactWindowSize = true;
         try
         {
@@ -3372,8 +3870,24 @@ public partial class MainWindow : Window
         }
     }
 
+    private void CaptureActiveCompactWindowSize()
+    {
+        if (!_compactSizeApplied ||
+            !_activeCompactLayoutKey.HasValue ||
+            WindowState != WindowState.Normal)
+        {
+            return;
+        }
+
+        _compactWindowSizes[_activeCompactLayoutKey.Value] = new Size(
+            Math.Max(480, ActualWidth),
+            Math.Max(120, ActualHeight));
+    }
+
     protected override void OnClosed(EventArgs e)
     {
+        if (_uiReady)
+            SaveSettings();
         _deviceRefreshTimer.Stop();
         _windowSource?.RemoveHook(WindowMessageHook);
         _windowSource = null;

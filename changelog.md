@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.3.7 - 2026-06-16
+
+### Added
+
+- Added multiple named Custom layouts for saving panel visibility, display mode, Compact state, stereo split, and window size.
+- Added the modal `Edit saved layouts...` screen with immediate layout preview, rename, delete, saved-content inspection, and manual Up / Down ordering.
+- Added persistent Compact window sizes for each panel combination.
+
+### Changed
+
+- Custom layouts now remain in creation order by default and preserve user-defined ordering.
+- Release ZIP packages now include the English and Japanese README files.
+
+### Fixed
+
+- Fixed Compact mode window dimensions being lost after leaving and re-entering Compact mode.
+
 ## 0.3.6 - 2026-06-15
 
 ### Added

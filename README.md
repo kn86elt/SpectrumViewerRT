@@ -46,6 +46,10 @@ Use the right-click menu to show or hide the main display, waveform, level meter
 
 Compact mode hides the settings area and title bar, making it possible to keep only a small level meter in a corner of the desktop. Normal and Compact modes remember their panel layouts separately.
 
+Compact window sizes are remembered for each panel combination. You can also save multiple named Custom layouts containing the panel arrangement, display mode, Compact state, and window size.
+
+Use `Custom > Edit saved layouts...` to preview saved layouts immediately, rename or delete them, inspect their contents, and change their order with the `Up` and `Down` buttons.
+
 ## Download and Start
 
 ### 1. Download the application
@@ -63,6 +67,8 @@ Choose the ZIP file containing `win-x64`, not one of the files labeled `Source c
 3. Choose a destination and select **Extract**.
 
 Extract the files before starting the application. Do not run it directly from inside the ZIP file.
+
+The ZIP also includes the English and Japanese README files for offline reference.
 
 ### 3. Start the application
 
@@ -88,6 +94,8 @@ Right-click inside the application to change visible panels, enter Compact mode,
 
 The right-click menu also provides direct selection of the VFD color and meter style.
 
+Use the `Custom` submenu to save the current screen arrangement under a name or load a saved layout. Multiple layouts can be stored and reordered from `Edit saved layouts...`. Selecting a layout in the editor immediately previews it in the running application.
+
 Click the LIVE TIME display beside the level meter to switch between elapsed time and the current clock. In Compact mode, you can also drag this display to move the window.
 
 ## Keyboard Shortcuts
@@ -107,7 +115,7 @@ Click the LIVE TIME display beside the level meter to switch between elapsed tim
 
 ## Settings
 
-Your display, color, panel layout, and window-mode choices are saved automatically and restored the next time the application starts.
+Your display, color, panel layout, Compact window sizes, Custom layouts, and window-mode choices are saved automatically and restored the next time the application starts.
 
 Use `Default Settings` inside the application to restore the original settings.
 

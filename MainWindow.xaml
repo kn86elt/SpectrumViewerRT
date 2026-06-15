@@ -281,6 +281,13 @@
                 </MenuItem>
                 <MenuItem Header="Always on top" x:Name="ContextAlwaysOnTopMenuItem" IsCheckable="True" Click="LayoutMenuItem_Click"/>
                 <Separator/>
+                <MenuItem Header="Custom">
+                    <MenuItem Header="Save current layout" Click="SaveCustomLayoutMenuItem_Click"/>
+                    <MenuItem Header="Load saved layout" x:Name="LoadCustomLayoutsMenuItem"/>
+                    <MenuItem Header="Edit saved layouts..." x:Name="EditCustomLayoutsMenuItem"
+                              Click="EditCustomLayoutsMenuItem_Click"/>
+                </MenuItem>
+                <Separator/>
                 <MenuItem Header="Show all panels" Click="ShowAllPanelsMenuItem_Click"/>
                 <MenuItem Header="Reset layout" Click="ResetLayoutMenuItem_Click"/>
                 <Separator/>
