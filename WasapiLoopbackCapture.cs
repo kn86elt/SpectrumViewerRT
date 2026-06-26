@@ -193,14 +193,28 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
             {
                 double outputVolumeGain = 1.0;
                 long nextVolumeRead = 0;
+                const int silenceIntervalMs = 40;
+                int silenceFrames = OutputSampleRate * silenceIntervalMs / 1000;
                 WaitHandle[] waitHandles = { audioReadyEvent, _stopEvent };
                 while (_running)
                 {
-                    int signaled = WaitHandle.WaitAny(waitHandles);
+                    int signaled = WaitHandle.WaitAny(waitHandles, silenceIntervalMs);
                     if (signaled == 1 || !_running)
                         break;
 
                     ThrowIfFailed(captureClient.GetNextPacketSize(out var packetFrames), "IAudioCaptureClient.GetNextPacketSize");
+
+                    if (packetFrames == 0)
+                    {
+                        var silence = new short[silenceFrames];
+                        SamplesAvailable?.Invoke(silence);
+                        StereoSamplesAvailable?.Invoke(silence, silence);
+                        _lastLevel = default;
+                        LevelAvailable?.Invoke(0);
+                        StereoLevelAvailable?.Invoke(default);
+                        continue;
+                    }
+
                     while (packetFrames > 0 && _running)
                     {
                         long now = Environment.TickCount64;

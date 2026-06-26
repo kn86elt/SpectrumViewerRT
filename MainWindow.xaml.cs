@@ -129,6 +129,8 @@ public partial class MainWindow : Window
     private double VuDisplayDbOffset => VuNormalizeEnabled ? 6.0 : 0.0;
     private DateTime _vfdDecayStarted;
     private bool _vfdDecayActive;
+    private double _vfdDecayPeakHoldDb;
+    private DateTime _vfdDecayPeakHoldUntil;
     private bool _compactSizeApplied;
     private bool _applyingCompactWindowSize;
     private double _normalWindowWidth = 1180;
@@ -229,7 +231,24 @@ public partial class MainWindow : Window
         _deviceRefreshTimer.Tick += (_, _) =>
         {
             _deviceRefreshTimer.Stop();
+            bool wasCapturing = _capture != null;
+            bool wasRecording = _isRecording;
             RefreshDevices();
+
+            if (wasCapturing && _capture != null && SelectedMode == CaptureMode.Microphone && DeviceCombo.SelectedIndex < 0)
+            {
+                StopCapture(triggerVfdDecay: false);
+                if (TryFallbackCapture(wasRecording))
+                {
+                    var deviceName = DeviceCombo.SelectedItem is AudioDevice d ? d.Name : "default";
+                    SetStatus($"Device lost — switched to {deviceName}");
+                }
+                else
+                {
+                    SetStoppedState();
+                    SetStatus("Input device removed");
+                }
+            }
         };
         RefreshDevices();
         ApplyDisplayMode();
@@ -312,7 +331,6 @@ public partial class MainWindow : Window
         {
             StopPlayback(updateStatus: false, restartLive: false);
             StopCapture(triggerVfdDecay: false);
-            CancelVfdDecay();
             if (record && clearRecording)
             {
                 _recorded.Clear();
@@ -376,10 +394,20 @@ public partial class MainWindow : Window
                 if (!ReferenceEquals(_capture, capture))
                     return;
 
-                StopCapture();
-                SetStoppedState();
+                bool wasRecording = _isRecording;
+                StopCapture(triggerVfdDecay: false);
                 RefreshDevices();
-                SetStatus(message);
+
+                if (TryFallbackCapture(wasRecording))
+                {
+                    var deviceName = DeviceCombo.SelectedItem is AudioDevice d ? d.Name : "default";
+                    SetStatus($"Device lost — switched to {deviceName}");
+                }
+                else
+                {
+                    SetStoppedState();
+                    SetStatus(message);
+                }
             });
 
             _monitor = null;
@@ -963,6 +991,9 @@ public partial class MainWindow : Window
 
     private void UpdateLevelMeter()
     {
+        if (_vfdDecayActive)
+            return;
+
         var now = DateTime.Now;
         double elapsedSeconds = Math.Clamp((now - _lastLevelMeterUpdate).TotalSeconds, 0, 0.25);
         _lastLevelMeterUpdate = now;
@@ -988,14 +1019,10 @@ public partial class MainWindow : Window
         else
         {
             _lastDotMeterLeft = _lastDotMeterRight = _lastDotMeterLeftHold = _lastDotMeterRightHold = int.MinValue;
-            if (Math.Abs(LevelMeter.LeftLevel - leftLevel) > 0.0000001)
-                LevelMeter.LeftLevel = leftLevel;
-            if (Math.Abs(LevelMeter.RightLevel - rightLevel) > 0.0000001)
-                LevelMeter.RightLevel = rightLevel;
-            if (Math.Abs(LevelMeter.LeftPeakHold - leftHold) > 0.0000001)
-                LevelMeter.LeftPeakHold = leftHold;
-            if (Math.Abs(LevelMeter.RightPeakHold - rightHold) > 0.0000001)
-                LevelMeter.RightPeakHold = rightHold;
+            LevelMeter.LeftLevel = leftLevel;
+            LevelMeter.RightLevel = rightLevel;
+            LevelMeter.LeftPeakHold = leftHold;
+            LevelMeter.RightPeakHold = rightHold;
         }
         int colorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
         int meterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
@@ -2019,6 +2046,28 @@ public partial class MainWindow : Window
         BeginCapture(record, clearRecording: false);
     }
 
+    private bool TryFallbackCapture(bool record)
+    {
+        try
+        {
+            if (SelectedMode == CaptureMode.SystemOutput)
+            {
+                BeginCapture(record, clearRecording: false);
+                return true;
+            }
+
+            if (DeviceCombo.Items.Count > 0)
+            {
+                if (DeviceCombo.SelectedIndex < 0)
+                    DeviceCombo.SelectedIndex = 0;
+                BeginCapture(record, clearRecording: false);
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     private bool ShouldPlayMonitorAudio() =>
         false;
 
@@ -2122,7 +2171,9 @@ public partial class MainWindow : Window
     {
         _vfdDecayStarted = DateTime.Now;
         _vfdDecayActive = true;
-        SetVfdDecayVisuals(14.0);
+        _vfdDecayPeakHoldDb = 14.0;
+        _vfdDecayPeakHoldUntil = _vfdDecayStarted.AddMilliseconds(900);
+        SetVfdDecayVisuals(14.0, 14.0);
         _vfdDecayTimer.Start();
     }
 
@@ -2137,26 +2188,35 @@ public partial class MainWindow : Window
         if (!_vfdDecayActive)
             return;
 
-        double elapsed = (DateTime.Now - _vfdDecayStarted).TotalSeconds;
+        var now = DateTime.Now;
+        double elapsed = (now - _vfdDecayStarted).TotalSeconds;
         double normalized = Math.Exp(-elapsed / 0.65);
         double db = -60.0 + 74.0 * normalized;
-        SetVfdDecayVisuals(db);
 
-        if (elapsed >= 3.0 || db <= -59.0)
+        if (now > _vfdDecayPeakHoldUntil)
+        {
+            double peakDecay = Math.Max(db, _vfdDecayPeakHoldDb - (now - _vfdDecayPeakHoldUntil).TotalSeconds * 80.0);
+            _vfdDecayPeakHoldDb = peakDecay;
+        }
+
+        SetVfdDecayVisuals(db, _vfdDecayPeakHoldDb);
+
+        if (elapsed >= 3.0 || (db <= -59.0 && _vfdDecayPeakHoldDb <= -59.0))
         {
             _vfdDecayActive = false;
             _vfdDecayTimer.Stop();
-            SetVfdDecayVisuals(-90.0);
+            SetVfdDecayVisuals(-90.0, -90.0);
         }
     }
 
-    private void SetVfdDecayVisuals(double db)
+    private void SetVfdDecayVisuals(double db, double peakDb)
     {
         double level = db <= -80 ? 0.0 : Math.Pow(10.0, db / 20.0);
+        double peakLevel = peakDb <= -80 ? 0.0 : Math.Pow(10.0, peakDb / 20.0);
         LevelMeter.LeftLevel = level;
         LevelMeter.RightLevel = level;
-        LevelMeter.LeftPeakHold = level;
-        LevelMeter.RightPeakHold = level;
+        LevelMeter.LeftPeakHold = peakLevel;
+        LevelMeter.RightPeakHold = peakLevel;
         LevelMeter.ColorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
         LevelMeter.MeterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
         LevelMeter.ShowUnlitSegments = ShowUnlitCheck.IsChecked == true;

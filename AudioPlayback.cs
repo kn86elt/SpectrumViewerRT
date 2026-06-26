@@ -59,7 +59,7 @@ public sealed class AudioPlayback : IDisposable
         {
             if (_pending.TryDequeue(out var buffer))
                 Free(buffer);
-            throw;
+            TryReopen();
         }
     }
 
@@ -87,6 +87,30 @@ public sealed class AudioPlayback : IDisposable
             AudioInterop.waveOutUnprepareHeader(_handle, buffer.HeaderPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>());
         Marshal.FreeHGlobal(buffer.DataPtr);
         Marshal.FreeHGlobal(buffer.HeaderPtr);
+    }
+
+    private void TryReopen()
+    {
+        try
+        {
+            while (_pending.TryDequeue(out var leftover))
+            {
+                Marshal.FreeHGlobal(leftover.DataPtr);
+                Marshal.FreeHGlobal(leftover.HeaderPtr);
+            }
+
+            try { AudioInterop.waveOutReset(_handle); } catch { }
+            try { AudioInterop.waveOutClose(_handle); } catch { }
+
+            var format = AudioInterop.Pcm16Mono(AudioCapture.SampleRate);
+            if (AudioInterop.waveOutOpen(out _handle, AudioInterop.WaveMapper, ref format, _callback, IntPtr.Zero, AudioInterop.CallbackFunction) == 0)
+            {
+                _open = true;
+                return;
+            }
+        }
+        catch { }
+        _open = false;
     }
 
     private static void ThrowIfFailed(uint result, string operation)

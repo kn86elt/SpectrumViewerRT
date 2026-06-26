@@ -114,26 +114,23 @@ public sealed class AudioCapture : IAudioCaptureSource
         }
 
         _callbacksIdle.Wait(TimeSpan.FromMilliseconds(100));
-        AudioInterop.waveInStop(handle);
-        AudioInterop.waveInReset(handle);
+        try { AudioInterop.waveInStop(handle); } catch { }
+        try { AudioInterop.waveInReset(handle); } catch { }
 
         if (!_callbacksIdle.Wait(TimeSpan.FromSeconds(1)))
-        {
             StatusAvailable?.Invoke("Input device cleanup timed out");
-            return;
-        }
 
         lock (_gate)
         {
             foreach (var buffer in _buffers)
             {
-                AudioInterop.waveInUnprepareHeader(handle, buffer.HeaderPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>());
+                try { AudioInterop.waveInUnprepareHeader(handle, buffer.HeaderPtr, (uint)Marshal.SizeOf<AudioInterop.WaveHeader>()); } catch { }
                 Marshal.FreeHGlobal(buffer.DataPtr);
                 Marshal.FreeHGlobal(buffer.HeaderPtr);
             }
 
             _buffers.Clear();
-            AudioInterop.waveInClose(handle);
+            try { AudioInterop.waveInClose(handle); } catch { }
             _handle = IntPtr.Zero;
             _stopping = false;
         }
