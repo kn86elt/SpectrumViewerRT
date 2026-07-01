@@ -46,6 +46,9 @@ public sealed class AudioCapture : IAudioCaptureSource
         _deviceId = deviceId;
     }
 
+    public static AudioDevice DefaultInputDevice { get; } =
+        new(AudioInterop.WaveMapper, "Default Windows input");
+
     public static IReadOnlyList<AudioDevice> GetInputDevices()
     {
         var devices = new List<AudioDevice>();
@@ -53,10 +56,18 @@ public sealed class AudioCapture : IAudioCaptureSource
         for (uint i = 0; i < count; i++)
         {
             if (AudioInterop.waveInGetDevCaps(i, out var caps, (uint)Marshal.SizeOf<AudioInterop.WaveInCaps>()) == 0)
-                devices.Add(new AudioDevice((int)i, string.IsNullOrWhiteSpace(caps.ProductName) ? $"Input {i}" : caps.ProductName));
+            {
+                string name = string.IsNullOrWhiteSpace(caps.ProductName) ? $"Input {i}" : caps.ProductName;
+                devices.Add(new AudioDevice((int)i, name));
+            }
         }
 
         return devices;
+    }
+
+    public static IReadOnlyList<AudioDevice> GetFallbackInputDevices()
+    {
+        return new[] { DefaultInputDevice };
     }
 
     public void Start(int deviceId)
@@ -206,8 +217,24 @@ public sealed class AudioCapture : IAudioCaptureSource
 
     private void NotifyCaptureStopped(string message)
     {
-        if (Interlocked.Exchange(ref _stopNotificationSent, 1) == 0)
-            CaptureStopped?.Invoke(message);
+        if (Interlocked.Exchange(ref _stopNotificationSent, 1) != 0)
+            return;
+
+        var handler = CaptureStopped;
+        if (handler == null)
+            return;
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                handler(message);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(ex);
+            }
+        });
     }
 
     public void Dispose() => Stop();

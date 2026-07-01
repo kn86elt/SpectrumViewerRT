@@ -1,35 +1,29 @@
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
-using NAudioLoopbackCapture = NAudio.Wave.WasapiLoopbackCapture;
 
 namespace SpectrumViewerRT;
 
-public sealed class WasapiLoopbackCapture : IAudioCaptureSource
+public sealed class WasapiInputCapture : IAudioCaptureSource
 {
     private sealed record PacketSamples(short[] Mono, short[] Left, short[] Right);
 
     private const int OutputSampleRate = AudioCapture.DefaultSampleRate;
-    public bool IsStereo => true;
 
-    private NAudioLoopbackCapture? _capture;
+    public static AudioDevice DefaultInputDevice { get; } =
+        new(-1, "Default Windows input");
+
+    private readonly string? _deviceId;
+    private WasapiCapture? _capture;
     private double _resamplePosition;
     private double _lastMono;
     private double _lastLeft;
     private double _lastRight;
     private LevelMeterReading _lastLevel;
-    private volatile bool _compensateOutputVolume;
-    private MMDevice? _renderDevice;
     private int _stopNotificationSent;
 
-    public WasapiLoopbackCapture(bool compensateOutputVolume = false)
+    public WasapiInputCapture(string? deviceId)
     {
-        _compensateOutputVolume = compensateOutputVolume;
-    }
-
-    public bool CompensateOutputVolume
-    {
-        get => _compensateOutputVolume;
-        set => _compensateOutputVolume = value;
+        _deviceId = deviceId;
     }
 
     public event Action<short[]>? SamplesAvailable;
@@ -39,6 +33,43 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
     public event Action<string>? StatusAvailable;
     public event Action<string>? CaptureStopped;
     public int SampleRate => OutputSampleRate;
+    public bool IsStereo { get; private set; } = true;
+
+    public static IReadOnlyList<AudioDevice> GetInputDevices()
+    {
+        Exception? lastError = null;
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                return GetInputDevicesCore();
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                Thread.Sleep(150);
+            }
+        }
+
+        throw new InvalidOperationException(
+            lastError == null
+                ? "WASAPI input device enumeration failed."
+                : $"WASAPI input device enumeration failed: {lastError.Message}",
+            lastError);
+    }
+
+    private static IReadOnlyList<AudioDevice> GetInputDevicesCore()
+    {
+        var devices = new List<AudioDevice> { DefaultInputDevice };
+        using var enumerator = new MMDeviceEnumerator();
+        int index = 0;
+        foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
+        {
+            devices.Add(new AudioDevice(index++, device.FriendlyName) { WasapiId = device.ID });
+        }
+
+        return devices;
+    }
 
     public void Start()
     {
@@ -49,11 +80,12 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         var capture = CreateCapture();
         _capture = capture;
         var format = capture.WaveFormat;
-        StatusAvailable?.Invoke($"WASAPI loopback: {format.SampleRate} Hz, {format.Channels} ch, {format.BitsPerSample} bit");
+        IsStereo = format.Channels > 1;
+        StatusAvailable?.Invoke($"WASAPI input: {format.SampleRate} Hz, {format.Channels} ch, {format.BitsPerSample} bit");
         capture.DataAvailable += Capture_DataAvailable;
         capture.RecordingStopped += Capture_RecordingStopped;
         capture.StartRecording();
-        StatusAvailable?.Invoke("WASAPI loopback started");
+        StatusAvailable?.Invoke("WASAPI input started");
     }
 
     public void Stop()
@@ -75,19 +107,19 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         finally
         {
             capture.Dispose();
-            _renderDevice?.Dispose();
-            _renderDevice = null;
         }
     }
 
     public void Dispose() => Stop();
 
-    private NAudioLoopbackCapture CreateCapture()
+    private WasapiCapture CreateCapture()
     {
-        var enumerator = new MMDeviceEnumerator();
-        _renderDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-        enumerator.Dispose();
-        return new NAudioLoopbackCapture(_renderDevice);
+        if (string.IsNullOrWhiteSpace(_deviceId))
+            return new WasapiCapture();
+
+        using var enumerator = new MMDeviceEnumerator();
+        var device = enumerator.GetDevice(_deviceId);
+        return new WasapiCapture(device);
     }
 
     private void Capture_DataAvailable(object? sender, WaveInEventArgs e)
@@ -103,7 +135,6 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
             int blockAlign = Math.Max(bytesPerSample, format.BlockAlign);
             int frames = e.BytesRecorded / blockAlign;
             bool float32 = format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32;
-            double outputVolumeGain = GetOutputVolumeGain();
             var samples = ConvertPacket(
                 e.Buffer,
                 frames,
@@ -111,8 +142,7 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
                 blockAlign,
                 format.BitsPerSample,
                 float32,
-                format.SampleRate,
-                outputVolumeGain);
+                format.SampleRate);
             if (samples.Mono.Length == 0)
                 return;
 
@@ -123,8 +153,8 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         }
         catch (Exception ex)
         {
-            StatusAvailable?.Invoke($"WASAPI loopback error: {ex.Message}");
-            NotifyCaptureStopped($"WASAPI loopback stopped: {ex.Message}");
+            StatusAvailable?.Invoke($"WASAPI input error: {ex.Message}");
+            NotifyCaptureStopped($"WASAPI input stopped: {ex.Message}");
         }
     }
 
@@ -132,29 +162,8 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
     {
         if (e.Exception != null)
         {
-            StatusAvailable?.Invoke($"WASAPI loopback stopped: {e.Exception.Message}");
-            NotifyCaptureStopped($"WASAPI loopback stopped: {e.Exception.Message}");
-        }
-    }
-
-    private double GetOutputVolumeGain()
-    {
-        if (!_compensateOutputVolume || _renderDevice == null)
-            return 1.0;
-
-        try
-        {
-            var volume = _renderDevice.AudioEndpointVolume;
-            if (volume.Mute)
-                return 1.0;
-            float levelDb = volume.MasterVolumeLevel;
-            if (!float.IsFinite(levelDb))
-                return 1.0;
-            return Math.Clamp(Math.Pow(10.0, -levelDb / 20.0), 1.0, 1000.0);
-        }
-        catch
-        {
-            return 1.0;
+            StatusAvailable?.Invoke($"WASAPI input stopped: {e.Exception.Message}");
+            NotifyCaptureStopped($"WASAPI input stopped: {e.Exception.Message}");
         }
     }
 
@@ -165,8 +174,7 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
         int blockAlign,
         int bits,
         bool float32,
-        int sourceRate,
-        double outputVolumeGain)
+        int sourceRate)
     {
         if (frames <= 0 || channels <= 0)
             return new PacketSamples(Array.Empty<short>(), Array.Empty<short>(), Array.Empty<short>());
@@ -189,7 +197,7 @@ public sealed class WasapiLoopbackCapture : IAudioCaptureSource
                 if (offset + bytesPerSample > raw.Length)
                     break;
 
-                double value = ReadSample(raw, offset, bits, float32) * outputVolumeGain;
+                double value = ReadSample(raw, offset, bits, float32);
                 sum += value;
                 if (channel == 0)
                 {

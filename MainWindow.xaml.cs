@@ -93,6 +93,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _playbackTimer = new();
     private short[] _playbackSamples = Array.Empty<short>();
     private string? _playbackTempFile;
+    private readonly SemaphoreSlim _deviceRefreshLock = new(1, 1);
+    private int _deviceRefreshVersion;
+    private IReadOnlyList<AudioDevice> _lastInputDevices = new[] { WasapiInputCapture.DefaultInputDevice };
     private int _lastPlaybackSampleOffset;
     private DateTime _recordingStarted;
     private DateTime _playbackStarted;
@@ -228,29 +231,22 @@ public partial class MainWindow : Window
         _vfdDecayTimer.Interval = TimeSpan.FromMilliseconds(33);
         _vfdDecayTimer.Tick += VfdDecayTimer_Tick;
         _deviceRefreshTimer.Interval = TimeSpan.FromMilliseconds(400);
-        _deviceRefreshTimer.Tick += (_, _) =>
+        _deviceRefreshTimer.Tick += async (_, _) =>
         {
             _deviceRefreshTimer.Stop();
             bool wasCapturing = _capture != null;
-            bool wasRecording = _isRecording;
-            RefreshDevices();
+            bool refreshSucceeded = await RefreshDevicesAsync();
 
-            if (wasCapturing && _capture != null && SelectedMode == CaptureMode.Microphone && DeviceCombo.SelectedIndex < 0)
+            if (wasCapturing &&
+                _capture != null &&
+                SelectedMode == CaptureMode.Microphone &&
+                (!refreshSucceeded || DeviceCombo.SelectedIndex < 0))
             {
                 StopCapture(triggerVfdDecay: false);
-                if (TryFallbackCapture(wasRecording))
-                {
-                    var deviceName = DeviceCombo.SelectedItem is AudioDevice d ? d.Name : "default";
-                    SetStatus($"Device lost — switched to {deviceName}");
-                }
-                else
-                {
-                    SetStoppedState();
-                    SetStatus("Input device removed");
-                }
+                SetStoppedState();
+                SetStatus("Input device removed. Reload or select another device.");
             }
         };
-        RefreshDevices();
         ApplyDisplayMode();
         _uiReady = true;
         ApplyWindowLayout();
@@ -258,19 +254,27 @@ public partial class MainWindow : Window
         UpdateTransportLeds();
         UpdateGridOverlay();
         TriggerVfdFullScaleDecay();
-        BeginCapture(record: false, clearRecording: false);
+        _ = InitializeDevicesAndCaptureAsync();
     }
 
     private CaptureMode SelectedMode =>
         ModeCombo.SelectedItem is ComboBoxItem { Tag: CaptureMode mode } ? mode : CaptureMode.Microphone;
 
-    private void ModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async Task InitializeDevicesAndCaptureAsync()
+    {
+        bool refreshSucceeded = await RefreshDevicesAsync();
+        if (_uiReady && refreshSucceeded && (SelectedMode == CaptureMode.SystemOutput || DeviceCombo.SelectedIndex >= 0))
+            BeginCapture(record: false, clearRecording: false);
+    }
+
+    private async void ModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_uiReady)
             return;
 
-        RefreshDevices();
-        RestartCaptureForSelectedSource();
+        bool refreshSucceeded = await RefreshDevicesAsync();
+        if (refreshSucceeded && (SelectedMode == CaptureMode.SystemOutput || DeviceCombo.SelectedIndex >= 0))
+            RestartCaptureForSelectedSource();
         if (!_loadingSettings)
             SaveSettings();
     }
@@ -292,12 +296,45 @@ public partial class MainWindow : Window
             SaveSettings();
     }
 
-    private void RefreshButton_Click(object sender, RoutedEventArgs e)
+    private void StatusText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount < 2 || StatusText == null || string.IsNullOrEmpty(StatusText.Text))
+            return;
+
+        try
+        {
+            Clipboard.SetText(StatusText.Text);
+            e.Handled = true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+    }
+
+    private async void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
         bool wasCapturing = _capture != null || _isRecording;
-        RefreshDevices();
-        if (wasCapturing && !_isPlayingBack)
+        bool wasMicrophoneCapture = wasCapturing && SelectedMode == CaptureMode.Microphone;
+        if (wasMicrophoneCapture)
+            StopCapture(triggerVfdDecay: false);
+
+        bool refreshSucceeded = await RefreshDevicesAsync();
+        if (wasCapturing &&
+            !_isPlayingBack &&
+            !wasMicrophoneCapture &&
+            refreshSucceeded &&
+            (SelectedMode == CaptureMode.SystemOutput || DeviceCombo.SelectedIndex >= 0))
+        {
             RestartCaptureForSelectedSource();
+        }
+        else if (wasMicrophoneCapture)
+        {
+            SetStoppedState();
+            SetStatus(refreshSucceeded
+                ? "Input device list reloaded. Select a device to monitor."
+                : "Device reload did not complete. Try Reload again.");
+        }
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -389,26 +426,27 @@ public partial class MainWindow : Window
                 if (ReferenceEquals(_capture, capture))
                     SetStatus(message);
             });
-            capture.CaptureStopped += message => Dispatcher.BeginInvoke(() =>
+            capture.CaptureStopped += message => Dispatcher.BeginInvoke(new Action(async () =>
             {
                 if (!ReferenceEquals(_capture, capture))
                     return;
 
                 bool wasRecording = _isRecording;
+                bool wasSystemOutput = SelectedMode == CaptureMode.SystemOutput;
                 StopCapture(triggerVfdDecay: false);
-                RefreshDevices();
+                bool refreshSucceeded = await RefreshDevicesAsync();
 
-                if (TryFallbackCapture(wasRecording))
+                if (refreshSucceeded && wasSystemOutput && TryFallbackCapture(wasRecording))
                 {
                     var deviceName = DeviceCombo.SelectedItem is AudioDevice d ? d.Name : "default";
-                    SetStatus($"Device lost — switched to {deviceName}");
+                    SetStatus($"Device lost - switched to {deviceName}");
                 }
                 else
                 {
                     SetStoppedState();
-                    SetStatus(message);
+                    SetStatus(wasSystemOutput ? message : "Input device removed. Reload or select another device.");
                 }
-            });
+            }));
 
             _monitor = null;
             capture.Start();
@@ -441,7 +479,7 @@ public partial class MainWindow : Window
         if (DeviceCombo.SelectedItem is not AudioDevice device)
             throw new InvalidOperationException("Input device is not selected.");
 
-        return new AudioCapture(device.Id);
+        return new WasapiInputCapture(device.WasapiId);
     }
 
     private void StopButton_Click(object sender, RoutedEventArgs e)
@@ -1637,53 +1675,115 @@ public partial class MainWindow : Window
         return Color.FromRgb(244, 20, 28);
     }
 
-    private void RefreshDevices()
+    private async Task<bool> RefreshDevicesAsync()
     {
         if (DeviceCombo == null)
-            return;
+            return false;
 
+        if (!await _deviceRefreshLock.WaitAsync(0))
+            return false;
+
+        int refreshId = Interlocked.Increment(ref _deviceRefreshVersion);
         _refreshingDevices = true;
         try
         {
-        if (SelectedMode == CaptureMode.SystemOutput)
-        {
-            DeviceCombo.ItemsSource = new[] { new AudioDevice(-1, "Default Windows output") };
-            DeviceCombo.SelectedIndex = 0;
-            DeviceCombo.IsEnabled = false;
-            CompensateSystemVolumeCheck.Visibility = Visibility.Visible;
-            CompensateSystemVolumeCheck.IsEnabled = true;
-            SetStatus("System output mode uses WASAPI loopback");
-            return;
-        }
+            if (RefreshButton != null)
+                RefreshButton.IsEnabled = false;
 
-        CompensateSystemVolumeCheck.Visibility = Visibility.Collapsed;
-        CompensateSystemVolumeCheck.IsEnabled = false;
-        AudioDevice? previousDevice = DeviceCombo.SelectedItem as AudioDevice;
-        var devices = AudioCapture.GetInputDevices();
-        DeviceCombo.ItemsSource = devices;
-        DeviceCombo.IsEnabled = devices.Count > 0;
-        if (devices.Count > 0)
-        {
-            int selectedIndex = previousDevice == null
-                ? -1
-                : devices.ToList().FindIndex(device =>
-                    device.Id == previousDevice.Id &&
-                    string.Equals(device.Name, previousDevice.Name, StringComparison.Ordinal));
-            if (selectedIndex < 0 && previousDevice != null)
+            if (SelectedMode == CaptureMode.SystemOutput)
             {
-                selectedIndex = devices.ToList().FindIndex(device =>
-                    string.Equals(device.Name, previousDevice.Name, StringComparison.Ordinal));
+                DeviceCombo.ItemsSource = new[] { new AudioDevice(-1, "Default Windows output") };
+                DeviceCombo.SelectedIndex = 0;
+                DeviceCombo.IsEnabled = false;
+                CompensateSystemVolumeCheck.Visibility = Visibility.Visible;
+                CompensateSystemVolumeCheck.IsEnabled = true;
+                SetStatus("System output mode uses WASAPI loopback");
+                return true;
             }
-            DeviceCombo.SelectedIndex = selectedIndex >= 0
-                ? selectedIndex
-                : previousDevice == null ? 0 : -1;
-        }
-        SetStatus(devices.Count > 0 ? $"{devices.Count} input device(s)" : "No input devices");
+
+            CompensateSystemVolumeCheck.Visibility = Visibility.Collapsed;
+            CompensateSystemVolumeCheck.IsEnabled = false;
+            AudioDevice? previousDevice = DeviceCombo.SelectedItem is AudioDevice previousInputDevice &&
+                                          !string.IsNullOrWhiteSpace(previousInputDevice.WasapiId)
+                ? previousInputDevice
+                : null;
+            var previousItems = _lastInputDevices.Count > 0
+                ? _lastInputDevices
+                : new[] { WasapiInputCapture.DefaultInputDevice };
+            DeviceCombo.ItemsSource = previousItems;
+            DeviceCombo.IsEnabled = false;
+            SetStatus("Reloading input devices...");
+
+            IReadOnlyList<AudioDevice> devices;
+            Exception? refreshError = null;
+            try
+            {
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                devices = WasapiInputCapture.GetInputDevices();
+            }
+            catch (Exception ex)
+            {
+                devices = Array.Empty<AudioDevice>();
+                refreshError = ex;
+            }
+
+            if (refreshId != Volatile.Read(ref _deviceRefreshVersion))
+                return false;
+
+            var deviceList = devices.ToList();
+            if (refreshError != null)
+                deviceList = previousItems.ToList();
+            else if (deviceList.Count == 0)
+                deviceList.Add(WasapiInputCapture.DefaultInputDevice);
+
+            if (refreshError == null)
+                _lastInputDevices = deviceList;
+
+            ApplyInputDevices(deviceList, previousDevice);
+            SetStatus(refreshError == null
+                ? deviceList.Count > 0 ? $"{deviceList.Count} input device(s)" : "No input devices"
+                : $"Device reload failed: {refreshError.Message}. Keeping previous input list.");
+            return refreshError == null;
         }
         finally
         {
-            _refreshingDevices = false;
+            if (refreshId == Volatile.Read(ref _deviceRefreshVersion))
+            {
+                _refreshingDevices = false;
+                if (RefreshButton != null)
+                    RefreshButton.IsEnabled = true;
+            }
+            _deviceRefreshLock.Release();
         }
+    }
+
+    private void ApplyFallbackInputDevices()
+    {
+        ApplyInputDevices(_lastInputDevices, null);
+    }
+
+    private void ApplyInputDevices(IReadOnlyList<AudioDevice> devices, AudioDevice? previousDevice)
+    {
+        DeviceCombo.ItemsSource = devices;
+        DeviceCombo.IsEnabled = devices.Count > 0;
+        if (devices.Count == 0)
+        {
+            DeviceCombo.SelectedIndex = -1;
+            return;
+        }
+
+        int selectedIndex = previousDevice == null
+            ? -1
+            : devices.ToList().FindIndex(device =>
+                !string.IsNullOrWhiteSpace(previousDevice.WasapiId) &&
+                string.Equals(device.WasapiId, previousDevice.WasapiId, StringComparison.OrdinalIgnoreCase));
+        if (selectedIndex < 0 && previousDevice != null)
+            selectedIndex = devices.ToList().FindIndex(device =>
+                string.Equals(device.Name, previousDevice.Name, StringComparison.Ordinal));
+
+        DeviceCombo.SelectedIndex = selectedIndex >= 0
+            ? selectedIndex
+            : 0;
     }
 
     private void ClearSpectrogram()
@@ -2122,7 +2222,12 @@ public partial class MainWindow : Window
             return;
 
         ModeCombo.IsEnabled = enabled;
-        DeviceCombo.IsEnabled = enabled && SelectedMode == CaptureMode.Microphone;
+        DeviceCombo.IsEnabled = enabled &&
+                                !_refreshingDevices &&
+                                SelectedMode == CaptureMode.Microphone &&
+                                DeviceCombo.Items.Count > 0;
+        if (RefreshButton != null)
+            RefreshButton.IsEnabled = enabled && !_refreshingDevices;
         CompensateSystemVolumeCheck.IsEnabled = enabled && SelectedMode == CaptureMode.SystemOutput;
     }
 

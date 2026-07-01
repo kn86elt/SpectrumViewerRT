@@ -349,6 +349,12 @@
                     <StackPanel Grid.Column="3" Orientation="Horizontal">
                         <ComboBox x:Name="DeviceCombo" HorizontalAlignment="Left" MinWidth="270" DisplayMemberPath="Name"
                                   SelectionChanged="DeviceCombo_SelectionChanged"/>
+                        <Button x:Name="RefreshButton" Width="34" MinWidth="34" Padding="0" Margin="8,0,0,0"
+                                Click="RefreshButton_Click" ToolTip="Reload devices">
+                            <Path Width="15" Height="15" Stretch="Uniform" Stroke="#D7E3EC" StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Data="M 13 7.5 A 5.5 5.5 0 1 1 11.4 3.6 M 13 2.4 L 13 7.5 L 8.2 7.5"/>
+                        </Button>
                         <CheckBox x:Name="CompensateSystemVolumeCheck" Content="Ignore System Volume"
                                   Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"
                                   Foreground="#E6EDF3"
@@ -387,7 +393,9 @@
                               ToolTip="Starts live display without recording."/>
                     <StackPanel x:Name="SettingsVisualOptionsPanel" Orientation="Horizontal">
                         <TextBlock Text="Status" Foreground="#65717D" Margin="0,0,8,0"/>
-                        <TextBlock x:Name="StatusText" Text="Ready" Foreground="#9FB0C1" MinWidth="260"/>
+                        <TextBlock x:Name="StatusText" Text="Ready" Foreground="#9FB0C1" MinWidth="260"
+                                   MouseLeftButtonDown="StatusText_MouseLeftButtonDown"
+                                   ToolTip="Double-click to copy status."/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                         <TextBlock Text="Rec Level"/>

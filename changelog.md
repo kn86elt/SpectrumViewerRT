@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.3.9 - 2026-07-02
+
+### Added
+
+- Added an icon-only device reload button.
+- Added double-click copying for status and error messages.
+
+### Changed
+
+- Migrated Audio Input capture and device enumeration to NAudio WASAPI.
+- Reworked System Output loopback capture to use NAudio WASAPI and removed the conflicting hand-written CoreAudio interop.
+- Kept the last successful Audio Input device list when reload encounters a transient failure.
+
+### Fixed
+
+- Fixed device reload failures caused by COM type conflicts after switching to WASAPI/NAudio.
+- Improved resilience when audio devices are hot-plugged while the app is running.
+- Prevented reload failures from collapsing the input device selector to only the default input.
+
 ## 0.3.7 - 2026-06-16
 
 ### Added
