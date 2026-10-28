@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-10-28
+
+### Added
+
+- Added a Live scope peak readout with five vertical sensitivity ranges for inspecting small waveforms.
+
+### Changed
+
+- Replaced the waveform mode selector with a one-click toggle and matched waveform label colors to the selected meter color.
+
 ## 0.4.0 - 2026-10-28
 
 ### Added

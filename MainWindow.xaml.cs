@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private const int SpectrogramHopSamples = DisplaySampleRate / 50;
     private const double DefaultRecordGainDb = 0.0;
     private const int WmDeviceChange = 0x0219;
+    private static readonly double[] LiveWaveformAmplitudeRanges = { 1.0, 0.5, 0.25, 0.125, 0.0625 };
     private static readonly double[] HannWindow = CreateHannWindow();
     private static readonly (double Position, byte R, byte G, byte B)[] ColorStops =
     {
@@ -153,6 +154,8 @@ public partial class MainWindow : Window
     private int _cachedSpectrogramScaleIndex = int.MinValue;
     private int _cachedSpectrogramMaxFrequencyIndex = int.MinValue;
     private StereoSplitMode _stereoSplitMode = StereoSplitMode.LeftRight;
+    private int _waveformModeIndex;
+    private int _liveWaveformScaleIndex;
 
     private readonly record struct PanelVisibilityState(
         bool Transport,
@@ -178,7 +181,7 @@ public partial class MainWindow : Window
 
     private bool IsAnalyzerMode => DisplayModeCombo.SelectedIndex >= 2;
     private bool IsStereoDisplayMode => DisplayModeCombo.SelectedIndex is 1 or 3;
-    private bool IsLiveWaveformMode => WaveformModeCombo.SelectedIndex == 1;
+    private bool IsLiveWaveformMode => _waveformModeIndex == 1;
 
     private static double[] CreateHannWindow()
     {
@@ -214,8 +217,6 @@ public partial class MainWindow : Window
         DisplayModeCombo.Items.Add("Spectrogram (Stereo)");
         DisplayModeCombo.Items.Add("Spectrum Analyzer (Mono)");
         DisplayModeCombo.Items.Add("Spectrum Analyzer (Stereo)");
-        WaveformModeCombo.Items.Add("Scrolling");
-        WaveformModeCombo.Items.Add("Live scope");
         ApplySettings(AppSettings.Load());
         _loadingSettings = false;
 
@@ -1677,6 +1678,12 @@ public partial class MainWindow : Window
 
         int sampleCount = Math.Min(FftSize, _sampleWindow.Count);
         int firstSample = _sampleWindow.Count - sampleCount;
+        double peak = 0;
+        for (int i = firstSample; i < _sampleWindow.Count; i++)
+            peak = Math.Max(peak, Math.Abs(_sampleWindow[i] / 32768.0));
+        UpdateWaveformAmplitudeReadout(peak);
+
+        double amplitudeRange = LiveWaveformAmplitudeRanges[Math.Clamp(_liveWaveformScaleIndex, 0, LiveWaveformAmplitudeRanges.Length - 1)];
         for (int column = 0; column < WaveformWidth && sampleCount > 0; column++)
         {
             int sampleStart = column * sampleCount / WaveformWidth;
@@ -1690,8 +1697,8 @@ public partial class MainWindow : Window
                 max = Math.Max(max, sample);
             }
 
-            int minY = SampleToWaveformY(min);
-            int maxY = SampleToWaveformY(max);
+            int minY = SampleToLiveWaveformY(min, amplitudeRange);
+            int maxY = SampleToLiveWaveformY(max, amplitudeRange);
             if (minY > maxY)
                 (minY, maxY) = (maxY, minY);
 
@@ -1700,6 +1707,13 @@ public partial class MainWindow : Window
         }
 
         _waveform.WritePixels(new Int32Rect(0, 0, WaveformWidth, WaveformHeight), _waveformPixels, WaveformWidth * 4, 0);
+    }
+
+    private int SampleToLiveWaveformY(short sample, double amplitudeRange)
+    {
+        int center = WaveformHeight / 2;
+        double normalized = sample / 32768.0 / amplitudeRange;
+        return Math.Clamp(center - (int)Math.Round(normalized * (WaveformHeight * 0.46)), 0, WaveformHeight - 1);
     }
 
     private int SampleToWaveformY(short sample)
@@ -1881,17 +1895,72 @@ public partial class MainWindow : Window
         SaveSettings();
     }
 
-    private void WaveformModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void WaveformModeToggleButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_uiReady || _loadingSettings)
             return;
 
+        _waveformModeIndex = IsLiveWaveformMode ? 0 : 1;
+        UpdateWaveformModeControls();
         _latestRenderSamples.Clear();
         _scrollColumnAccumulator = 0;
         ClearWaveform();
         if (IsLiveWaveformMode)
             DrawLiveWaveformFrame();
         SaveSettings();
+    }
+
+    private void WaveformAmplitudeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_uiReady || !IsLiveWaveformMode)
+            return;
+
+        _liveWaveformScaleIndex = (_liveWaveformScaleIndex + 1) % LiveWaveformAmplitudeRanges.Length;
+        DrawLiveWaveformFrame();
+        SaveSettings();
+    }
+
+    private void UpdateWaveformModeControls()
+    {
+        if (WaveformModeToggleButton == null || WaveformAmplitudeButton == null)
+            return;
+
+        WaveformModeToggleButton.Content = IsLiveWaveformMode ? "Live scope" : "Scrolling";
+        WaveformModeToggleButton.ToolTip = IsLiveWaveformMode
+            ? "Click to switch to the scrolling waveform."
+            : "Click to switch to Live scope.";
+        WaveformAmplitudeButton.Visibility = IsLiveWaveformMode ? Visibility.Visible : Visibility.Collapsed;
+        UpdateWaveformAmplitudeReadout(0);
+        UpdateWaveformLabelColor();
+    }
+
+    private void UpdateWaveformLabelColor()
+    {
+        if (WaveformTitleText == null || WaveformModeToggleButton == null || WaveformAmplitudeButton == null)
+            return;
+
+        Color accent = Math.Max(0, MeterColorCombo.SelectedIndex) switch
+        {
+            1 => Color.FromRgb(126, 255, 124),
+            2 => Color.FromRgb(255, 205, 92),
+            3 => Color.FromRgb(104, 184, 255),
+            _ => Color.FromRgb(188, 255, 248)
+        };
+        var brush = new SolidColorBrush(accent);
+        WaveformTitleText.Foreground = brush;
+        WaveformModeToggleButton.Foreground = brush;
+        WaveformAmplitudeButton.Foreground = brush;
+    }
+
+    private void UpdateWaveformAmplitudeReadout(double peak)
+    {
+        if (WaveformAmplitudeButton == null)
+            return;
+
+        double range = LiveWaveformAmplitudeRanges[Math.Clamp(_liveWaveformScaleIndex, 0, LiveWaveformAmplitudeRanges.Length - 1)];
+        string peakText = peak.ToString("0.000", CultureInfo.InvariantCulture);
+        string rangeText = range.ToString("0.####", CultureInfo.InvariantCulture);
+        WaveformAmplitudeButton.Content = $"Peak {peakText} FS  |  ±{rangeText} FS";
     }
 
     private void ControlValue_Changed(object sender, EventArgs e)
@@ -2434,7 +2503,9 @@ public partial class MainWindow : Window
         MeterStyleCombo.SelectedIndex = settings.MeterStyleIndex;
         SetStatusDisplayStyle(settings.StatusDisplayStyleIndex);
         DisplayModeCombo.SelectedIndex = settings.DisplayModeIndex;
-        WaveformModeCombo.SelectedIndex = settings.WaveformModeIndex;
+        _waveformModeIndex = settings.WaveformModeIndex;
+        _liveWaveformScaleIndex = settings.WaveformScaleIndex;
+        UpdateWaveformModeControls();
         _stereoSplitMode = (StereoSplitMode)settings.StereoSplitModeIndex;
         _monoAnalyzerBandCount = settings.MonoAnalyzerBandCount;
         _stereoAnalyzerBandCount = settings.StereoAnalyzerBandCount;
@@ -2493,7 +2564,8 @@ public partial class MainWindow : Window
         MeterStyleIndex = MeterStyleCombo.SelectedIndex,
         StatusDisplayStyleIndex = StatusSegmentMenuItem.IsChecked ? 1 : 0,
         DisplayModeIndex = DisplayModeCombo.SelectedIndex,
-        WaveformModeIndex = WaveformModeCombo.SelectedIndex,
+        WaveformModeIndex = _waveformModeIndex,
+        WaveformScaleIndex = _liveWaveformScaleIndex,
         AnalyzerModeIndex = DisplayModeCombo.SelectedIndex == 3 ? 1 : 0,
         MonoAnalyzerBandCount = _monoAnalyzerBandCount,
         StereoAnalyzerBandCount = _stereoAnalyzerBandCount,
@@ -2724,6 +2796,7 @@ public partial class MainWindow : Window
             return;
 
         SyncMeterContextMenus();
+        UpdateWaveformLabelColor();
         LevelMeter.ColorTheme = Math.Max(0, MeterColorCombo.SelectedIndex);
         LevelMeter.MeterStyle = Math.Max(0, MeterStyleCombo.SelectedIndex);
         LevelMeter.ShowUnlitSegments = ShowUnlitCheck.IsChecked == true;

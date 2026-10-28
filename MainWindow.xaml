@@ -561,11 +561,17 @@
                     <Image x:Name="WaveformImage" Stretch="Fill"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Canvas x:Name="WaveformGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
-                    <TextBlock Text="Waveform" Foreground="#8DA0B3" Margin="10,8,0,0" VerticalAlignment="Top"/>
-                    <ComboBox x:Name="WaveformModeCombo" Width="132" MinWidth="132" Height="26"
-                              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,5,8,0"
-                              SelectionChanged="WaveformModeCombo_SelectionChanged"
-                              ToolTip="Scrolling follows the spectrogram. Live scope shows the latest 4096 samples (about 85 ms)."/>
+                    <TextBlock x:Name="WaveformTitleText" Text="Waveform" Foreground="#8DA0B3"
+                               Margin="10,8,0,0" VerticalAlignment="Top"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,5,8,0">
+                        <Button x:Name="WaveformAmplitudeButton" Width="210" MinWidth="210" Height="26"
+                                Margin="0,0,6,0" Padding="4,0" Visibility="Collapsed"
+                                Click="WaveformAmplitudeButton_Click"
+                                ToolTip="Shows peak amplitude and vertical range. Click to cycle through more sensitive ranges for small waveforms."/>
+                        <Button x:Name="WaveformModeToggleButton" Content="Scrolling" Width="112" MinWidth="112" Height="26"
+                                Margin="0" Padding="4,0" Click="WaveformModeToggleButton_Click"
+                                ToolTip="Click to switch to Live scope."/>
+                    </StackPanel>
                 </Grid>
             </Border>
 

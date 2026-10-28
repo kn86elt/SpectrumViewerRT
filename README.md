@@ -92,7 +92,7 @@ The application is not digitally signed, so Windows may display a security warni
 
 Right-click inside the application to change visible panels, enter Compact mode, select a display mode, or keep the window always on top.
 
-Choose `Scrolling` or `Live scope` from the selector at the top right of the waveform panel. Live scope redraws the latest 4096 samples, making waveform amplitude and cycle changes easy to inspect.
+Click the waveform-mode button at the top right of the waveform panel to switch between `Scrolling` and `Live scope`. In Live scope, the adjacent button shows the measured peak level and cycles through five vertical ranges from ±1.0 FS to ±0.0625 FS, making small waveforms easier to inspect.
 
 The right-click menu also provides direct selection of the VFD color and meter style.
 
