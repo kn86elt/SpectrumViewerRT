@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+## 0.4.2 - 2026-10-28
+
 ### Added
 
 - Added a draggable divider to adjust the spectrum/spectrogram-to-waveform height ratio without resizing the window or other panels.
+
+### Changed
+
+- Live scope waveforms now use anti-aliased vector rendering that scales with the display area.
 
 ## 0.4.1 - 2026-10-28
 
