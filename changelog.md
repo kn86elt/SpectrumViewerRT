@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-28
+
+### Added
+
+- Added a Live scope waveform mode that redraws the latest 4096 samples (about 85 ms at 48 kHz), while keeping the existing waveform that scrolls with the spectrogram.
+
 ## 0.3.9 - 2026-07-02
 
 ### Added

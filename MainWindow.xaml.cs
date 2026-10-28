@@ -178,6 +178,7 @@ public partial class MainWindow : Window
 
     private bool IsAnalyzerMode => DisplayModeCombo.SelectedIndex >= 2;
     private bool IsStereoDisplayMode => DisplayModeCombo.SelectedIndex is 1 or 3;
+    private bool IsLiveWaveformMode => WaveformModeCombo.SelectedIndex == 1;
 
     private static double[] CreateHannWindow()
     {
@@ -213,6 +214,8 @@ public partial class MainWindow : Window
         DisplayModeCombo.Items.Add("Spectrogram (Stereo)");
         DisplayModeCombo.Items.Add("Spectrum Analyzer (Mono)");
         DisplayModeCombo.Items.Add("Spectrum Analyzer (Stereo)");
+        WaveformModeCombo.Items.Add("Scrolling");
+        WaveformModeCombo.Items.Add("Live scope");
         ApplySettings(AppSettings.Load());
         _loadingSettings = false;
 
@@ -835,7 +838,8 @@ public partial class MainWindow : Window
             _sampleWindow.AddRange(samples);
             if (DisplayModeCombo.SelectedIndex == 0)
                 _spectrogramSamples.AddRange(samples);
-            _latestRenderSamples.AddRange(samples);
+            if (!IsLiveWaveformMode)
+                _latestRenderSamples.AddRange(samples);
         }
 
         while (_pendingStereoSamples.TryDequeue(out var stereo))
@@ -876,13 +880,20 @@ public partial class MainWindow : Window
                     DrawPendingSpectrogramFrames();
             }
 
-            _scrollColumnAccumulator += PixelsPerSecond * appended / DisplaySampleRate;
-            int waveformColumns = Math.Clamp((int)_scrollColumnAccumulator, 0, WaveformWidth);
-            if (waveformColumns > 0)
+            if (IsLiveWaveformMode)
             {
-                _scrollColumnAccumulator -= waveformColumns;
-                DrawWaveformColumns(waveformColumns);
-                _latestRenderSamples.Clear();
+                DrawLiveWaveformFrame();
+            }
+            else
+            {
+                _scrollColumnAccumulator += PixelsPerSecond * appended / DisplaySampleRate;
+                int waveformColumns = Math.Clamp((int)_scrollColumnAccumulator, 0, WaveformWidth);
+                if (waveformColumns > 0)
+                {
+                    _scrollColumnAccumulator -= waveformColumns;
+                    DrawWaveformColumns(waveformColumns);
+                    _latestRenderSamples.Clear();
+                }
             }
         }
         else if (IsAnalyzerMode && _capture != null)
@@ -1636,6 +1647,61 @@ public partial class MainWindow : Window
         _waveform.WritePixels(new Int32Rect(0, 0, WaveformWidth, WaveformHeight), _waveformPixels, WaveformWidth * 4, 0);
     }
 
+    private void DrawLiveWaveformFrame()
+    {
+        Array.Clear(_waveformPixels);
+
+        int center = WaveformHeight / 2;
+        if (GridCheck.IsChecked == true)
+        {
+            int divisionWidth = WaveformWidth / (int)TimeDivisions;
+            for (int x = 0; x < WaveformWidth; x += divisionWidth)
+            {
+                for (int y = 0; y < WaveformHeight; y++)
+                    SetWaveformPixel(x, y, 17, 28, 39);
+            }
+
+            for (int y = 0; y < WaveformHeight; y++)
+                SetWaveformPixel(0, y, 17, 28, 39);
+
+            for (int division = 1; division <= 4; division++)
+            {
+                int offset = division * WaveformHeight / 5;
+                for (int x = 0; x < WaveformWidth; x++)
+                    SetWaveformPixel(x, offset, 17, 28, 39);
+            }
+        }
+
+        for (int x = 0; x < WaveformWidth; x++)
+            SetWaveformPixel(x, center, 29, 44, 59);
+
+        int sampleCount = Math.Min(FftSize, _sampleWindow.Count);
+        int firstSample = _sampleWindow.Count - sampleCount;
+        for (int column = 0; column < WaveformWidth && sampleCount > 0; column++)
+        {
+            int sampleStart = column * sampleCount / WaveformWidth;
+            int sampleEnd = Math.Min(sampleCount, Math.Max(sampleStart + 1, (column + 1) * sampleCount / WaveformWidth));
+            short min = short.MaxValue;
+            short max = short.MinValue;
+            for (int i = sampleStart; i < sampleEnd; i++)
+            {
+                short sample = _sampleWindow[firstSample + i];
+                min = Math.Min(min, sample);
+                max = Math.Max(max, sample);
+            }
+
+            int minY = SampleToWaveformY(min);
+            int maxY = SampleToWaveformY(max);
+            if (minY > maxY)
+                (minY, maxY) = (maxY, minY);
+
+            for (int y = minY; y <= maxY; y++)
+                SetWaveformPixel(column, y, 90, 220, 255);
+        }
+
+        _waveform.WritePixels(new Int32Rect(0, 0, WaveformWidth, WaveformHeight), _waveformPixels, WaveformWidth * 4, 0);
+    }
+
     private int SampleToWaveformY(short sample)
     {
         int center = WaveformHeight / 2;
@@ -1815,6 +1881,19 @@ public partial class MainWindow : Window
         SaveSettings();
     }
 
+    private void WaveformModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady || _loadingSettings)
+            return;
+
+        _latestRenderSamples.Clear();
+        _scrollColumnAccumulator = 0;
+        ClearWaveform();
+        if (IsLiveWaveformMode)
+            DrawLiveWaveformFrame();
+        SaveSettings();
+    }
+
     private void ControlValue_Changed(object sender, EventArgs e)
     {
         if (!_uiReady)
@@ -1835,6 +1914,8 @@ public partial class MainWindow : Window
         if (ReferenceEquals(sender, TimeDivisionSlider) && !_loadingSettings)
             ResetDisplayHistory();
         UpdateGridOverlay();
+        if (IsLiveWaveformMode)
+            DrawLiveWaveformFrame();
         if (!_loadingSettings)
             SaveSettings();
     }
@@ -1854,8 +1935,10 @@ public partial class MainWindow : Window
         WaveformGridCanvas.Children.Clear();
         TimeAxisCanvas.Children.Clear();
         UpdateControlLabels();
+        bool liveWaveform = IsLiveWaveformMode;
+        WaveformGridCanvas.Visibility = liveWaveform ? Visibility.Collapsed : Visibility.Visible;
 
-        if (GridCheck.IsChecked != true)
+        if (GridCheck.IsChecked != true || liveWaveform)
             return;
 
         DrawFrequencyGrid();
@@ -2351,6 +2434,7 @@ public partial class MainWindow : Window
         MeterStyleCombo.SelectedIndex = settings.MeterStyleIndex;
         SetStatusDisplayStyle(settings.StatusDisplayStyleIndex);
         DisplayModeCombo.SelectedIndex = settings.DisplayModeIndex;
+        WaveformModeCombo.SelectedIndex = settings.WaveformModeIndex;
         _stereoSplitMode = (StereoSplitMode)settings.StereoSplitModeIndex;
         _monoAnalyzerBandCount = settings.MonoAnalyzerBandCount;
         _stereoAnalyzerBandCount = settings.StereoAnalyzerBandCount;
@@ -2409,6 +2493,7 @@ public partial class MainWindow : Window
         MeterStyleIndex = MeterStyleCombo.SelectedIndex,
         StatusDisplayStyleIndex = StatusSegmentMenuItem.IsChecked ? 1 : 0,
         DisplayModeIndex = DisplayModeCombo.SelectedIndex,
+        WaveformModeIndex = WaveformModeCombo.SelectedIndex,
         AnalyzerModeIndex = DisplayModeCombo.SelectedIndex == 3 ? 1 : 0,
         MonoAnalyzerBandCount = _monoAnalyzerBandCount,
         StereoAnalyzerBandCount = _stereoAnalyzerBandCount,
@@ -2738,7 +2823,7 @@ public partial class MainWindow : Window
         TimeAxisCanvas.Visibility = analyzer ? Visibility.Collapsed : Visibility.Visible;
         SpectrumAnalyzer.Visibility = analyzer ? Visibility.Visible : Visibility.Collapsed;
         WaveformImage.Visibility = Visibility.Visible;
-        WaveformGridCanvas.Visibility = Visibility.Visible;
+        WaveformGridCanvas.Visibility = IsLiveWaveformMode ? Visibility.Collapsed : Visibility.Visible;
         if (_uiReady)
             ApplyWindowLayout();
     }

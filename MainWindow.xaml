@@ -562,6 +562,10 @@
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Canvas x:Name="WaveformGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
                     <TextBlock Text="Waveform" Foreground="#8DA0B3" Margin="10,8,0,0" VerticalAlignment="Top"/>
+                    <ComboBox x:Name="WaveformModeCombo" Width="132" MinWidth="132" Height="26"
+                              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,5,8,0"
+                              SelectionChanged="WaveformModeCombo_SelectionChanged"
+                              ToolTip="Scrolling follows the spectrogram. Live scope shows the latest 4096 samples (about 85 ms)."/>
                 </Grid>
             </Border>
 

@@ -22,7 +22,7 @@ Display audio playing through Windows or sound received from a connected microph
 
 - A spectrogram that shows how sound changes over time
 - Mono and stereo spectrum analyzers for viewing frequency balance
-- A waveform and left/right level meter
+- A waveform that can scroll with the spectrogram or show the latest 85 ms in Live scope mode, plus a left/right level meter
 - A LIVE elapsed-time display that can also show the current clock
 - Automatic refresh of the input-device list when audio devices are connected or disconnected
 
@@ -91,6 +91,8 @@ The application is not digitally signed, so Windows may display a security warni
 4. After recording, use `Play` to review it and `Save WAV` to save it.
 
 Right-click inside the application to change visible panels, enter Compact mode, select a display mode, or keep the window always on top.
+
+Choose `Scrolling` or `Live scope` from the selector at the top right of the waveform panel. Live scope redraws the latest 4096 samples, making waveform amplitude and cycle changes easy to inspect.
 
 The right-click menu also provides direct selection of the VFD color and meter style.
 

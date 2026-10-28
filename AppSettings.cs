@@ -17,6 +17,7 @@ public sealed class AppSettings
     public int MeterStyleIndex { get; set; } = Defaults.MeterStyleIndex;
     public int StatusDisplayStyleIndex { get; set; } = Defaults.StatusDisplayStyleIndex;
     public int DisplayModeIndex { get; set; } = Defaults.DisplayModeIndex;
+    public int WaveformModeIndex { get; set; } = Defaults.WaveformModeIndex;
     public int AnalyzerModeIndex { get; set; } = Defaults.AnalyzerModeIndex;
     public int MonoAnalyzerBandCount { get; set; } = Defaults.AnalyzerBandCount;
     public int StereoAnalyzerBandCount { get; set; } = Defaults.AnalyzerBandCount;
@@ -101,6 +102,7 @@ public sealed class AppSettings
         StatusDisplayStyleIndex = Math.Clamp(StatusDisplayStyleIndex, 0, 1);
         SettingsVersion = Defaults.SettingsVersion;
         DisplayModeIndex = Math.Clamp(DisplayModeIndex, 0, 3);
+        WaveformModeIndex = Math.Clamp(WaveformModeIndex, 0, 1);
         AnalyzerModeIndex = Math.Clamp(AnalyzerModeIndex, 0, 1);
         MonoAnalyzerBandCount = Math.Clamp(MonoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
         StereoAnalyzerBandCount = Math.Clamp(StereoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
@@ -192,6 +194,7 @@ public static class Defaults
     public const int MeterStyleIndex = 0;
     public const int StatusDisplayStyleIndex = 0;
     public const int DisplayModeIndex = 0;
+    public const int WaveformModeIndex = 0;
     public const int AnalyzerModeIndex = 0;
     public const int StereoSplitModeIndex = 0;
     public const int AnalyzerBandCount = 48;
