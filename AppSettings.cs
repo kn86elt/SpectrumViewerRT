@@ -18,7 +18,8 @@ public sealed class AppSettings
     public int StatusDisplayStyleIndex { get; set; } = Defaults.StatusDisplayStyleIndex;
     public int DisplayModeIndex { get; set; } = Defaults.DisplayModeIndex;
     public int WaveformModeIndex { get; set; } = Defaults.WaveformModeIndex;
-    public int WaveformScaleIndex { get; set; } = Defaults.WaveformScaleIndex;
+    public int WaveformTimebaseIndex { get; set; } = Defaults.WaveformTimebaseIndex;
+    public double WaveformPanelHeightRatio { get; set; } = Defaults.WaveformPanelHeightRatio;
     public int AnalyzerModeIndex { get; set; } = Defaults.AnalyzerModeIndex;
     public int MonoAnalyzerBandCount { get; set; } = Defaults.AnalyzerBandCount;
     public int StereoAnalyzerBandCount { get; set; } = Defaults.AnalyzerBandCount;
@@ -104,7 +105,10 @@ public sealed class AppSettings
         SettingsVersion = Defaults.SettingsVersion;
         DisplayModeIndex = Math.Clamp(DisplayModeIndex, 0, 3);
         WaveformModeIndex = Math.Clamp(WaveformModeIndex, 0, 1);
-        WaveformScaleIndex = Math.Clamp(WaveformScaleIndex, 0, 4);
+        WaveformTimebaseIndex = Math.Clamp(WaveformTimebaseIndex, 0, 4);
+        WaveformPanelHeightRatio = double.IsFinite(WaveformPanelHeightRatio)
+            ? WaveformPanelHeightRatio <= 0 ? 0 : Math.Clamp(WaveformPanelHeightRatio, 0.05, 0.95)
+            : 0;
         AnalyzerModeIndex = Math.Clamp(AnalyzerModeIndex, 0, 1);
         MonoAnalyzerBandCount = Math.Clamp(MonoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
         StereoAnalyzerBandCount = Math.Clamp(StereoAnalyzerBandCount, Defaults.MinAnalyzerBandCount, Defaults.MaxAnalyzerBandCount);
@@ -197,7 +201,8 @@ public static class Defaults
     public const int StatusDisplayStyleIndex = 0;
     public const int DisplayModeIndex = 0;
     public const int WaveformModeIndex = 0;
-    public const int WaveformScaleIndex = 0;
+    public const int WaveformTimebaseIndex = 1;
+    public const double WaveformPanelHeightRatio = 0;
     public const int AnalyzerModeIndex = 0;
     public const int StereoSplitModeIndex = 0;
     public const int AnalyzerBandCount = 48;

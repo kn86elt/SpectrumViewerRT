@@ -535,7 +535,7 @@
             </Grid>
         </Border>
 
-        <Grid x:Name="MainContentGrid" Margin="14" Background="Transparent">
+        <Grid x:Name="MainContentGrid" Margin="14" Background="Transparent" SizeChanged="MainContentGrid_SizeChanged">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="24"/>
@@ -561,16 +561,44 @@
                     <Image x:Name="WaveformImage" Stretch="Fill"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <Canvas x:Name="WaveformGridCanvas" IsHitTestVisible="False" SizeChanged="GridCanvas_SizeChanged"/>
-                    <TextBlock x:Name="WaveformTitleText" Text="Waveform" Foreground="#8DA0B3"
-                               Margin="10,8,0,0" VerticalAlignment="Top"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,5,8,0">
-                        <Button x:Name="WaveformAmplitudeButton" Width="210" MinWidth="210" Height="26"
-                                Margin="0,0,6,0" Padding="4,0" Visibility="Collapsed"
-                                Click="WaveformAmplitudeButton_Click"
-                                ToolTip="Shows peak amplitude and vertical range. Click to cycle through more sensitive ranges for small waveforms."/>
-                        <Button x:Name="WaveformModeToggleButton" Content="Scrolling" Width="112" MinWidth="112" Height="26"
-                                Margin="0" Padding="4,0" Click="WaveformModeToggleButton_Click"
+                    <local:LiveWaveformDisplay x:Name="LiveWaveformDisplay" IsHitTestVisible="False"
+                                               ClipToBounds="True" Visibility="Collapsed"/>
+                    <Thumb x:Name="DisplayWaveformResizeThumb" Height="7" VerticalAlignment="Top"
+                           Background="Transparent" Cursor="SizeNS"
+                           DragDelta="DisplayWaveformResizeThumb_DragDelta"
+                           DragCompleted="DisplayWaveformResizeThumb_DragCompleted"
+                           ToolTip="Drag to adjust the spectrum and waveform heights.">
+                        <Thumb.Template>
+                            <ControlTemplate TargetType="Thumb">
+                                <Grid Background="Transparent">
+                                    <Border x:Name="ResizeGripLine" Height="1" VerticalAlignment="Center" Background="#45515E"/>
+                                </Grid>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="ResizeGripLine" Property="Background" Value="#8DA0B3"/>
+                                    </Trigger>
+                                    <Trigger Property="IsDragging" Value="True">
+                                        <Setter TargetName="ResizeGripLine" Property="Background" Value="#BCEEEA"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Thumb.Template>
+                    </Thumb>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,7,0,0">
+                        <TextBlock x:Name="WaveformTitleText" Text="Waveform" Foreground="#8DA0B3"/>
+                        <TextBlock x:Name="WaveformPeakText" Text="Peak 0.000 FS" Foreground="#8DA0B3"
+                                   Margin="8,0,0,0" Visibility="Collapsed"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Vertical" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,4,0">
+                        <Button x:Name="WaveformModeToggleButton" Content="Scrolling" Width="96" MinWidth="96" Height="21"
+                                Margin="0" Padding="0" Background="Transparent" BorderBrush="Transparent" BorderThickness="0"
+                                FocusVisualStyle="{x:Null}" Click="WaveformModeToggleButton_Click"
                                 ToolTip="Click to switch to Live scope."/>
+                        <Button x:Name="WaveformTimebaseButton" Width="96" MinWidth="96" Height="21"
+                                Margin="0" Padding="0" Background="Transparent" BorderBrush="Transparent" BorderThickness="0"
+                                FocusVisualStyle="{x:Null}" Visibility="Collapsed"
+                                Click="WaveformTimebaseButton_Click"
+                                ToolTip="Click to cycle the Live scope time scale."/>
                     </StackPanel>
                 </Grid>
             </Border>

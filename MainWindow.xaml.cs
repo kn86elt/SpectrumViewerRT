@@ -27,7 +27,7 @@ public partial class MainWindow : Window
     private const int SpectrogramHopSamples = DisplaySampleRate / 50;
     private const double DefaultRecordGainDb = 0.0;
     private const int WmDeviceChange = 0x0219;
-    private static readonly double[] LiveWaveformAmplitudeRanges = { 1.0, 0.5, 0.25, 0.125, 0.0625 };
+    private static readonly double[] LiveWaveformTimebaseSecondsPerDivision = { 0.0005, 0.001, 0.002, 0.005, 0.01 };
     private static readonly double[] HannWindow = CreateHannWindow();
     private static readonly (double Position, byte R, byte G, byte B)[] ColorStops =
     {
@@ -142,6 +142,7 @@ public partial class MainWindow : Window
     private WindowState _normalWindowState = WindowState.Normal;
     private bool _layoutInitialized;
     private bool _lastLayoutCompact;
+    private double? _waveformPanelHeightRatio;
     private double _normalMainDisplayHeight = 240;
     private double _compactMainDisplayHeight = 210;
     private PanelVisibilityState _normalPanelState = PanelVisibilityState.NormalDefault;
@@ -155,7 +156,7 @@ public partial class MainWindow : Window
     private int _cachedSpectrogramMaxFrequencyIndex = int.MinValue;
     private StereoSplitMode _stereoSplitMode = StereoSplitMode.LeftRight;
     private int _waveformModeIndex;
-    private int _liveWaveformScaleIndex;
+    private int _liveWaveformTimebaseIndex = Defaults.WaveformTimebaseIndex;
 
     private readonly record struct PanelVisibilityState(
         bool Transport,
@@ -1650,70 +1651,15 @@ public partial class MainWindow : Window
 
     private void DrawLiveWaveformFrame()
     {
-        Array.Clear(_waveformPixels);
-
-        int center = WaveformHeight / 2;
-        if (GridCheck.IsChecked == true)
-        {
-            int divisionWidth = WaveformWidth / (int)TimeDivisions;
-            for (int x = 0; x < WaveformWidth; x += divisionWidth)
-            {
-                for (int y = 0; y < WaveformHeight; y++)
-                    SetWaveformPixel(x, y, 17, 28, 39);
-            }
-
-            for (int y = 0; y < WaveformHeight; y++)
-                SetWaveformPixel(0, y, 17, 28, 39);
-
-            for (int division = 1; division <= 4; division++)
-            {
-                int offset = division * WaveformHeight / 5;
-                for (int x = 0; x < WaveformWidth; x++)
-                    SetWaveformPixel(x, offset, 17, 28, 39);
-            }
-        }
-
-        for (int x = 0; x < WaveformWidth; x++)
-            SetWaveformPixel(x, center, 29, 44, 59);
-
-        int sampleCount = Math.Min(FftSize, _sampleWindow.Count);
+        double secondsPerDivision = LiveWaveformTimebaseSecondsPerDivision[Math.Clamp(_liveWaveformTimebaseIndex, 0, LiveWaveformTimebaseSecondsPerDivision.Length - 1)];
+        int visibleSampleCount = Math.Max(1, (int)Math.Round(secondsPerDivision * TimeDivisions * DisplaySampleRate));
+        int sampleCount = Math.Min(visibleSampleCount, _sampleWindow.Count);
         int firstSample = _sampleWindow.Count - sampleCount;
         double peak = 0;
         for (int i = firstSample; i < _sampleWindow.Count; i++)
             peak = Math.Max(peak, Math.Abs(_sampleWindow[i] / 32768.0));
-        UpdateWaveformAmplitudeReadout(peak);
-
-        double amplitudeRange = LiveWaveformAmplitudeRanges[Math.Clamp(_liveWaveformScaleIndex, 0, LiveWaveformAmplitudeRanges.Length - 1)];
-        for (int column = 0; column < WaveformWidth && sampleCount > 0; column++)
-        {
-            int sampleStart = column * sampleCount / WaveformWidth;
-            int sampleEnd = Math.Min(sampleCount, Math.Max(sampleStart + 1, (column + 1) * sampleCount / WaveformWidth));
-            short min = short.MaxValue;
-            short max = short.MinValue;
-            for (int i = sampleStart; i < sampleEnd; i++)
-            {
-                short sample = _sampleWindow[firstSample + i];
-                min = Math.Min(min, sample);
-                max = Math.Max(max, sample);
-            }
-
-            int minY = SampleToLiveWaveformY(min, amplitudeRange);
-            int maxY = SampleToLiveWaveformY(max, amplitudeRange);
-            if (minY > maxY)
-                (minY, maxY) = (maxY, minY);
-
-            for (int y = minY; y <= maxY; y++)
-                SetWaveformPixel(column, y, 90, 220, 255);
-        }
-
-        _waveform.WritePixels(new Int32Rect(0, 0, WaveformWidth, WaveformHeight), _waveformPixels, WaveformWidth * 4, 0);
-    }
-
-    private int SampleToLiveWaveformY(short sample, double amplitudeRange)
-    {
-        int center = WaveformHeight / 2;
-        double normalized = sample / 32768.0 / amplitudeRange;
-        return Math.Clamp(center - (int)Math.Round(normalized * (WaveformHeight * 0.46)), 0, WaveformHeight - 1);
+        UpdateWaveformPeakReadout(peak);
+        LiveWaveformDisplay.SetFrame(_sampleWindow, firstSample, sampleCount, GridCheck.IsChecked == true);
     }
 
     private int SampleToWaveformY(short sample)
@@ -1877,6 +1823,7 @@ public partial class MainWindow : Window
     {
         Array.Clear(_waveformPixels);
         _waveform.WritePixels(new Int32Rect(0, 0, WaveformWidth, WaveformHeight), _waveformPixels, WaveformWidth * 4, 0);
+        LiveWaveformDisplay.ClearFrame();
         UpdateGridOverlay();
     }
 
@@ -1910,33 +1857,37 @@ public partial class MainWindow : Window
         SaveSettings();
     }
 
-    private void WaveformAmplitudeButton_Click(object sender, RoutedEventArgs e)
+    private void WaveformTimebaseButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_uiReady || !IsLiveWaveformMode)
             return;
 
-        _liveWaveformScaleIndex = (_liveWaveformScaleIndex + 1) % LiveWaveformAmplitudeRanges.Length;
+        _liveWaveformTimebaseIndex = (_liveWaveformTimebaseIndex + 1) % LiveWaveformTimebaseSecondsPerDivision.Length;
+        UpdateWaveformTimebaseLabel();
         DrawLiveWaveformFrame();
         SaveSettings();
     }
 
     private void UpdateWaveformModeControls()
     {
-        if (WaveformModeToggleButton == null || WaveformAmplitudeButton == null)
+        if (WaveformModeToggleButton == null || WaveformTimebaseButton == null || WaveformPeakText == null)
             return;
 
         WaveformModeToggleButton.Content = IsLiveWaveformMode ? "Live scope" : "Scrolling";
         WaveformModeToggleButton.ToolTip = IsLiveWaveformMode
             ? "Click to switch to the scrolling waveform."
             : "Click to switch to Live scope.";
-        WaveformAmplitudeButton.Visibility = IsLiveWaveformMode ? Visibility.Visible : Visibility.Collapsed;
-        UpdateWaveformAmplitudeReadout(0);
+        WaveformTimebaseButton.Visibility = IsLiveWaveformMode ? Visibility.Visible : Visibility.Collapsed;
+        WaveformPeakText.Visibility = IsLiveWaveformMode ? Visibility.Visible : Visibility.Collapsed;
+        UpdateWaveformRenderVisibility();
+        UpdateWaveformTimebaseLabel();
+        UpdateWaveformPeakReadout(0);
         UpdateWaveformLabelColor();
     }
 
     private void UpdateWaveformLabelColor()
     {
-        if (WaveformTitleText == null || WaveformModeToggleButton == null || WaveformAmplitudeButton == null)
+        if (WaveformTitleText == null || WaveformPeakText == null || WaveformModeToggleButton == null || WaveformTimebaseButton == null)
             return;
 
         Color accent = Math.Max(0, MeterColorCombo.SelectedIndex) switch
@@ -1948,19 +1899,36 @@ public partial class MainWindow : Window
         };
         var brush = new SolidColorBrush(accent);
         WaveformTitleText.Foreground = brush;
+        WaveformPeakText.Foreground = brush;
         WaveformModeToggleButton.Foreground = brush;
-        WaveformAmplitudeButton.Foreground = brush;
+        WaveformTimebaseButton.Foreground = brush;
     }
 
-    private void UpdateWaveformAmplitudeReadout(double peak)
+    private void UpdateWaveformTimebaseLabel()
     {
-        if (WaveformAmplitudeButton == null)
+        if (WaveformTimebaseButton == null)
             return;
 
-        double range = LiveWaveformAmplitudeRanges[Math.Clamp(_liveWaveformScaleIndex, 0, LiveWaveformAmplitudeRanges.Length - 1)];
+        double secondsPerDivision = LiveWaveformTimebaseSecondsPerDivision[Math.Clamp(_liveWaveformTimebaseIndex, 0, LiveWaveformTimebaseSecondsPerDivision.Length - 1)];
+        string timebaseText = (secondsPerDivision * 1000).ToString("0.##", CultureInfo.InvariantCulture);
+        WaveformTimebaseButton.Content = $"{timebaseText} ms/div";
+    }
+
+    private void UpdateWaveformPeakReadout(double peak)
+    {
+        if (WaveformPeakText == null)
+            return;
+
         string peakText = peak.ToString("0.000", CultureInfo.InvariantCulture);
-        string rangeText = range.ToString("0.####", CultureInfo.InvariantCulture);
-        WaveformAmplitudeButton.Content = $"Peak {peakText} FS  |  ±{rangeText} FS";
+        WaveformPeakText.Text = $"Peak {peakText} FS";
+    }
+
+    private void UpdateWaveformRenderVisibility()
+    {
+        bool live = IsLiveWaveformMode;
+        WaveformImage.Visibility = live ? Visibility.Collapsed : Visibility.Visible;
+        LiveWaveformDisplay.Visibility = live ? Visibility.Visible : Visibility.Collapsed;
+        WaveformGridCanvas.Visibility = live ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void ControlValue_Changed(object sender, EventArgs e)
@@ -2504,7 +2472,10 @@ public partial class MainWindow : Window
         SetStatusDisplayStyle(settings.StatusDisplayStyleIndex);
         DisplayModeCombo.SelectedIndex = settings.DisplayModeIndex;
         _waveformModeIndex = settings.WaveformModeIndex;
-        _liveWaveformScaleIndex = settings.WaveformScaleIndex;
+        _liveWaveformTimebaseIndex = settings.WaveformTimebaseIndex;
+        _waveformPanelHeightRatio = settings.WaveformPanelHeightRatio > 0
+            ? settings.WaveformPanelHeightRatio
+            : null;
         UpdateWaveformModeControls();
         _stereoSplitMode = (StereoSplitMode)settings.StereoSplitModeIndex;
         _monoAnalyzerBandCount = settings.MonoAnalyzerBandCount;
@@ -2565,7 +2536,8 @@ public partial class MainWindow : Window
         StatusDisplayStyleIndex = StatusSegmentMenuItem.IsChecked ? 1 : 0,
         DisplayModeIndex = DisplayModeCombo.SelectedIndex,
         WaveformModeIndex = _waveformModeIndex,
-        WaveformScaleIndex = _liveWaveformScaleIndex,
+        WaveformTimebaseIndex = _liveWaveformTimebaseIndex,
+        WaveformPanelHeightRatio = _waveformPanelHeightRatio ?? Defaults.WaveformPanelHeightRatio,
         AnalyzerModeIndex = DisplayModeCombo.SelectedIndex == 3 ? 1 : 0,
         MonoAnalyzerBandCount = _monoAnalyzerBandCount,
         StereoAnalyzerBandCount = _stereoAnalyzerBandCount,
@@ -2895,8 +2867,7 @@ public partial class MainWindow : Window
         SpectrogramGridCanvas.Visibility = analyzer ? Visibility.Collapsed : Visibility.Visible;
         TimeAxisCanvas.Visibility = analyzer ? Visibility.Collapsed : Visibility.Visible;
         SpectrumAnalyzer.Visibility = analyzer ? Visibility.Visible : Visibility.Collapsed;
-        WaveformImage.Visibility = Visibility.Visible;
-        WaveformGridCanvas.Visibility = IsLiveWaveformMode ? Visibility.Collapsed : Visibility.Visible;
+        UpdateWaveformRenderVisibility();
         if (_uiReady)
             ApplyWindowLayout();
     }
@@ -4054,15 +4025,27 @@ public partial class MainWindow : Window
                 : new GridLength(1, GridUnitType.Star)
             : new GridLength(0);
         double fixedPanelScale = Math.Min(1, scale);
-        MainContentGrid.RowDefinitions[1].Height = showTimeAxis
-            ? new GridLength((compact ? 18 : 24) * fixedPanelScale)
-            : new GridLength(0);
-        MainContentGrid.RowDefinitions[2].Height = showWaveform
-            ? new GridLength((compact ? 66 : 112) * fixedPanelScale)
-            : new GridLength(0);
-        MainContentGrid.RowDefinitions[3].Height = showLevelMeter
-            ? new GridLength((compact ? 78 : 90) * fixedPanelScale)
-            : new GridLength(0);
+        double timeAxisHeight = showTimeAxis ? (compact ? 18 : 24) * fixedPanelScale : 0;
+        double waveformHeight = showWaveform ? (compact ? 66 : 112) * fixedPanelScale : 0;
+        double levelMeterHeight = showLevelMeter ? (compact ? 78 : 90) * fixedPanelScale : 0;
+        if (showMain && showWaveform && _waveformPanelHeightRatio is double ratio)
+        {
+            double resizableHeight = MainContentGrid.ActualHeight - timeAxisHeight - levelMeterHeight;
+            if (resizableHeight <= 0)
+                resizableHeight = MainContentGrid.RowDefinitions[0].ActualHeight + MainContentGrid.RowDefinitions[2].ActualHeight;
+
+            if (resizableHeight > 0)
+            {
+                double minimumMainHeight = Math.Min((compact ? 72 : 96) * fixedPanelScale, resizableHeight * 0.5);
+                double minimumWaveformHeight = Math.Min((compact ? 42 : 54) * fixedPanelScale, resizableHeight - minimumMainHeight);
+                double maximumWaveformHeight = Math.Max(minimumWaveformHeight, resizableHeight - minimumMainHeight);
+                waveformHeight = Math.Clamp(resizableHeight * ratio, minimumWaveformHeight, maximumWaveformHeight);
+            }
+        }
+
+        MainContentGrid.RowDefinitions[1].Height = new GridLength(timeAxisHeight);
+        MainContentGrid.RowDefinitions[2].Height = new GridLength(waveformHeight);
+        MainContentGrid.RowDefinitions[3].Height = new GridLength(levelMeterHeight);
 
         double spacingScale = fixedPanelScale;
         MainContentGrid.Margin = compact
@@ -4086,6 +4069,46 @@ public partial class MainWindow : Window
             Math.Clamp(preferredStatusWidth * Math.Clamp(availableWidth / (compact ? 750 : 1120), 0.72, 1.15),
                 minimumStatusWidth,
                 preferredStatusWidth * 1.15));
+    }
+
+    private void DisplayWaveformResizeThumb_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        if (!_uiReady ||
+            MainDisplayPanel.Visibility != Visibility.Visible ||
+            WaveformPanel.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        RowDefinition mainRow = MainContentGrid.RowDefinitions[0];
+        RowDefinition waveformRow = MainContentGrid.RowDefinitions[2];
+        double combinedHeight = mainRow.ActualHeight + waveformRow.ActualHeight;
+        if (combinedHeight <= 0)
+            return;
+
+        bool compact = CompactMenuItem.IsChecked;
+        double scale = Math.Min(1, Math.Clamp(ActualHeight / Math.Max(1, _preferredLayoutHeight), 0.2, 1.35));
+        double minimumMainHeight = Math.Min((compact ? 72 : 96) * scale, combinedHeight * 0.5);
+        double minimumWaveformHeight = Math.Min((compact ? 42 : 54) * scale, combinedHeight - minimumMainHeight);
+        double maximumWaveformHeight = Math.Max(minimumWaveformHeight, combinedHeight - minimumMainHeight);
+        double newWaveformHeight = Math.Clamp(waveformRow.ActualHeight - e.VerticalChange, minimumWaveformHeight, maximumWaveformHeight);
+
+        waveformRow.Height = new GridLength(newWaveformHeight);
+        mainRow.Height = new GridLength(combinedHeight - newWaveformHeight);
+        _waveformPanelHeightRatio = newWaveformHeight / combinedHeight;
+        e.Handled = true;
+    }
+
+    private void DisplayWaveformResizeThumb_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (_uiReady)
+            SaveSettings();
+    }
+
+    private void MainContentGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_uiReady)
+            ApplyResponsivePanelSizing();
     }
 
     private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

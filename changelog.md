@@ -2,15 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- Added a draggable divider to adjust the spectrum/spectrogram-to-waveform height ratio without resizing the window or other panels.
+
 ## 0.4.1 - 2026-10-28
 
 ### Added
 
-- Added a Live scope peak readout with five vertical sensitivity ranges for inspecting small waveforms.
+- Added a Live scope peak readout and five selectable horizontal time scales for inspecting waveform detail.
 
 ### Changed
 
-- Replaced the waveform mode selector with a one-click toggle and matched waveform label colors to the selected meter color.
+- Replaced the waveform mode selector with a one-click toggle, grouped borderless controls vertically at the right edge, and matched waveform label colors to the selected meter color.
 
 ## 0.4.0 - 2026-10-28
 

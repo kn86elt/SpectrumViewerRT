@@ -22,7 +22,7 @@ Display audio playing through Windows or sound received from a connected microph
 
 - A spectrogram that shows how sound changes over time
 - Mono and stereo spectrum analyzers for viewing frequency balance
-- A waveform that can scroll with the spectrogram or show the latest 85 ms in Live scope mode, plus a left/right level meter
+- A waveform that can scroll with the spectrogram or use a selectable time scale in Live scope mode, plus a left/right level meter
 - A LIVE elapsed-time display that can also show the current clock
 - Automatic refresh of the input-device list when audio devices are connected or disconnected
 
@@ -92,7 +92,9 @@ The application is not digitally signed, so Windows may display a security warni
 
 Right-click inside the application to change visible panels, enter Compact mode, select a display mode, or keep the window always on top.
 
-Click the waveform-mode button at the top right of the waveform panel to switch between `Scrolling` and `Live scope`. In Live scope, the adjacent button shows the measured peak level and cycles through five vertical ranges from ±1.0 FS to ±0.0625 FS, making small waveforms easier to inspect.
+Click the waveform-mode button at the top right of the waveform panel to switch between `Scrolling` and `Live scope`. In Live scope, the peak level is shown beside the waveform label. The small time-scale button at the right cycles through five time-per-division values from 0.5 to 10 ms/div to make waveform detail easier to inspect.
+
+Drag the boundary at the top of the waveform panel to change the relative heights of the spectrum/spectrogram and waveform panels. The window size and other panels stay fixed, and the chosen ratio is saved.
 
 The right-click menu also provides direct selection of the VFD color and meter style.
 
